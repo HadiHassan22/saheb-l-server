@@ -1,0 +1,11 @@
+# secrets
+.env
+
+# runtime state and logs (live on the host, not in git)
+data/
+logs/
+
+# local env
+.venv/
+__pycache__/
+.selfupdate-summary.md

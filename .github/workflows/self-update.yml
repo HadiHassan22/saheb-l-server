@@ -1,0 +1,50 @@
+# Carries out passed proposals: writes the change, checks it, merges it,
+# and rolls it back if the new version doesn't come up. PROTECTED: see
+# PROTECTED.md. The steps are in .github/selfupdate/run.py.
+#
+# Needs, set once by the repository owner:
+#   - repository variable BOT_URL: the bot's public Railway address
+#   - repository secret ANTHROPIC_API_KEY
+name: Self-update
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+# One run at a time: each run waits for its own deploy before the next
+# change can start.
+concurrency:
+  group: self-update
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write # labels
+
+jobs:
+  update:
+    if: vars.BOT_URL != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Keep the token out of .git/config, where Claude Code could read it.
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -r requirements.txt
+      - run: python .github/selfupdate/run.py
+        env:
+          BOT_URL: ${{ vars.BOT_URL }}
+          GH_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CODER_MODEL: claude-sonnet-5
+          REVIEWER_MODEL: claude-opus-5-5

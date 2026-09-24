@@ -1,0 +1,156 @@
+"""Checks for the settings and the proposal lifecycle. No Discord needed.
+
+    python -m unittest
+"""
+
+import shutil
+import tempfile
+import unittest
+from pathlib import Path
+
+import proposals
+import settings
+import store
+
+NOW = 1_800_000_000
+DAY = proposals.DAY
+VETERAN = NOW - 30 * DAY  # joined long enough ago to vote
+
+
+class WithTempData(unittest.TestCase):
+    def setUp(self):
+        self._saved_dir = store.DATA_DIR
+        self._tmp = tempfile.mkdtemp()
+        store.DATA_DIR = Path(self._tmp)
+
+    def tearDown(self):
+        store.DATA_DIR = self._saved_dir
+        shutil.rmtree(self._tmp)
+
+    def general(self, author=1, now=NOW):
+        return proposals.open_proposal(author, " Title ", " Details ", now)
+
+    def vote(self, no, votes, now=NOW + 60):
+        """votes: {voter_id: "yes" | "no"}"""
+        for voter, choice in votes.items():
+            proposals.cast(no, voter, VETERAN, choice, now)
+
+
+class Settings(WithTempData):
+    def test_defaults_match_the_server_description(self):
+        self.assertEqual(settings.current(), {
+            "voting_hours": 24, "quorum": 5, "pass_percent": 50,
+            "voter_min_days": 7, "max_open_per_member": 3,
+            "warning_days": 30, "warnings_before_timeout": 3,
+            "first_timeout_minutes": 60, "repeat_timeout_hours": 24,
+            "timeouts_before_ban": 2, "act_percent": 80, "review_percent": 30,
+        })
+
+    def test_values_outside_the_bounds_are_refused(self):
+        self.assertIsNone(settings.check("quorum", 3))
+        self.assertIn("between 3 and 100", settings.check("quorum", 2))
+        self.assertIn("between 50 and 90", settings.check("pass_percent", 40))
+        self.assertIn("no setting", settings.check("owner_powers", 1))
+        with self.assertRaises(ValueError):
+            settings.apply("quorum", 1)
+
+    def test_applied_value_persists(self):
+        settings.apply("voting_hours", 48)
+        self.assertEqual(settings.current()["voting_hours"], 48)
+
+
+class Opening(WithTempData):
+    def test_proposal_locks_in_the_rules_it_opened_under(self):
+        p = self.general()
+        self.assertEqual((p["no"], p["title"], p["details"]), (1, "Title", "Details"))
+        self.assertEqual(p["closes_at"], NOW + 24 * 60 * 60)
+        settings.apply("quorum", 10)
+        self.assertEqual(proposals.get(1)["quorum"], 5)
+        self.assertEqual(self.general()["quorum"], 10)
+
+    def test_numbers_are_never_reused(self):
+        self.assertEqual([self.general()["no"] for _ in range(3)], [1, 2, 3])
+
+    def test_open_proposal_limit_is_per_member_and_frees_up_on_close(self):
+        for _ in range(3):
+            self.general(author=1)
+        with self.assertRaisesRegex(proposals.Refused, "limit"):
+            self.general(author=1)
+        self.general(author=2)
+        proposals.close(1, NOW + DAY)
+        self.general(author=1)
+
+    def test_setting_proposal_is_checked_and_described(self):
+        with self.assertRaisesRegex(proposals.Refused, "between 3 and 100"):
+            proposals.open_proposal(1, "", "", NOW, setting="quorum", value=1)
+        with self.assertRaisesRegex(proposals.Refused, "already"):
+            proposals.open_proposal(1, "", "", NOW, setting="quorum", value=5)
+        p = proposals.open_proposal(1, "", "too slow", NOW, setting="voting_hours", value=48)
+        self.assertEqual(p["title"], "Voting window: 48 hours")
+        self.assertIn("from 24 hours to 48 hours", p["details"])
+        self.assertIn("too slow", p["details"])
+
+
+class Voting(WithTempData):
+    def test_only_members_past_the_minimum_can_vote(self):
+        self.general()
+        proposals.cast(1, 10, NOW - 7 * DAY, "yes", NOW)
+        with self.assertRaisesRegex(proposals.Refused, "7 days"):
+            proposals.cast(1, 11, NOW - 6 * DAY, "yes", NOW)
+        with self.assertRaisesRegex(proposals.Refused, "7 days"):
+            proposals.cast(1, 12, None, "yes", NOW)
+
+    def test_a_vote_can_be_changed_and_counts_once(self):
+        self.general()
+        self.vote(1, {10: "yes"})
+        self.vote(1, {10: "no"})
+        self.assertEqual(proposals.tally(proposals.get(1)), (0, 1))
+
+    def test_no_voting_after_the_window_or_on_unknown_proposals(self):
+        self.general()
+        with self.assertRaisesRegex(proposals.Refused, "closed"):
+            proposals.cast(1, 10, VETERAN, "yes", NOW + DAY)
+        with self.assertRaisesRegex(proposals.Refused, "exist"):
+            proposals.cast(99, 10, VETERAN, "yes", NOW)
+
+
+class Outcome(unittest.TestCase):
+    def test_quorum_then_strict_majority(self):
+        self.assertEqual(proposals.outcome(4, 0, 5, 50), proposals.NO_QUORUM)
+        self.assertEqual(proposals.outcome(3, 2, 5, 50), proposals.PASSED)
+        self.assertEqual(proposals.outcome(3, 3, 5, 50), proposals.FAILED)
+
+    def test_threshold_means_more_than(self):
+        self.assertEqual(proposals.outcome(3, 2, 5, 60), proposals.FAILED)
+        self.assertEqual(proposals.outcome(4, 1, 5, 60), proposals.PASSED)
+
+
+class Closing(WithTempData):
+    def test_due_only_after_the_window(self):
+        self.general()
+        self.assertEqual(proposals.due(NOW + DAY - 1), [])
+        self.assertEqual([p["no"] for p in proposals.due(NOW + DAY)], [1])
+
+    def test_close_keeps_totals_and_destroys_ballots(self):
+        self.general()
+        self.vote(1, {10: "yes", 11: "yes", 12: "yes", 13: "no", 14: "no"})
+        p = proposals.close(1, NOW + DAY)
+        self.assertEqual((p["no"], p["status"], p["totals"], p["votes"]),
+                         (1, proposals.PASSED, {"yes": 3, "no": 2}, {}))
+        self.assertEqual(proposals.get(1)["votes"], {})
+        self.assertEqual(proposals.due(NOW + 2 * DAY), [])
+        self.assertEqual(proposals.close(1, NOW + 2 * DAY)["closed_at"], NOW + DAY)
+
+    def test_passed_setting_change_is_applied_and_failed_one_is_not(self):
+        proposals.open_proposal(1, "", "", NOW, setting="voting_hours", value=48)
+        proposals.open_proposal(2, "", "", NOW, setting="quorum", value=10)
+        self.vote(1, {v: "yes" for v in range(10, 15)})
+        self.vote(2, {v: "no" for v in range(10, 15)})
+        proposals.close(1, NOW + DAY)
+        proposals.close(2, NOW + DAY)
+        self.assertEqual(settings.current()["voting_hours"], 48)
+        self.assertEqual(settings.current()["quorum"], 5)
+
+
+if __name__ == "__main__":
+    unittest.main()
