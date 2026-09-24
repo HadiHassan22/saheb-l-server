@@ -14,7 +14,7 @@ in the repository's history.
 | `PROTECTED.md` | This list. |
 | `ai.py`, `store.py` | Where the AI key is kept and how it is used, and how private files are written. |
 | `health.py` | The health check. Rollback relies on it to tell whether a new version came up. |
-| `guard.py` | Takes moderation-level permissions off every role and channel override, so no member ever holds power over another. |
+| `guard.py` | Takes moderation-level permissions off every role and channel override, the Admin role included, so nobody can act on the server except through the bot, which logs it. |
 | `admins.py` | Who the admins are, and that only the owner picks them. No other file may touch the stored list of admins either. |
 | `railway.json`, `railpack.json` | How the bot is deployed and health-checked. |
 | `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `.agents/`, `.mcp.json` | Claude Code reads these by itself on every self-update run. A change here would instruct every later run. |
@@ -36,10 +36,11 @@ them with the version currently running.
   - the self-harm support message keeps Embrace's lifeline (1564), and the
     score that triggers it can't be raised (`judge.SUPPORT_AT`).
 
-- **What happens without a vote.** The things the bot does the moment
-  it's asked (the personal and light tiers in `assistant.py`) can't grow:
-  no tool can be added to them or moved into them. Tools can be removed
-  from them, or added as drafts that need a vote.
+- **What members get without a vote.** The things the bot does the
+  moment any member asks (the personal and light tiers in `assistant.py`)
+  can't grow: no tool can be added to them or moved into them. Tools can
+  be removed from them, or added as drafts that need a vote. What admins
+  can do without a vote is not limited by this (see below).
 - **The channels the bot depends on** (`actions.CORE`) stay protected
   from being renamed or deleted by vote.
 - **The rules.** Rules 4 to 6 stay fixed (`conduct.FIXED`), and their
@@ -47,10 +48,21 @@ them with the version currently running.
 
 ## What no change may do
 
-- Give any role or member power over others: roles here are cosmetic.
-  The one exception is set here, not by vote: admins the owner picks
-  (`admins.py`) can skip the vote on a code change, which still goes
-  through every check below. They can't skip any other vote.
+- Give any role or member power over others, except the admins. Roles
+  are cosmetic, and every role, the Admin role included, loses Discord's
+  own moderation powers (`guard.py`).
+- Change who the admins are, or who picks them. Only the owner does
+  (`admins.py`), and no other file may touch the stored list. What admins
+  can do is not protected: it is up to the owner, and an admin's code
+  change can extend it. Today admins can do anything a vote can, at once,
+  and withdraw any open proposal. They act only through the bot, which
+  posts every admin action in `#server-log` with who did it; a change
+  that lets an admin act without that record is refused.
+- Show members where the code is kept. The repository is on the owner's
+  own GitHub account, and linking to it from the server would identify
+  them. No message, embed or answer members can see may contain a GitHub
+  link; admins can ask for it with `/admin github`, which only they see.
+  Members still get every status and summary, without the link.
 
 - Read, print, store or send any key or token: the Discord token, the AI
   key, or any other secret. New code may not read environment variables

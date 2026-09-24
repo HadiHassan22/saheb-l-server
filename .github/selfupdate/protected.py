@@ -49,6 +49,10 @@ ACCESS = re.compile(
 # Added lines that name the stored list of admins, which only admins.py
 # (and so only the owner, with /admin) may change.
 ADMIN_LIST = re.compile(r"""['"]admins(\.json)?['"]""")
+# Added lines that could show members a link to the GitHub repository,
+# which is on the owner's own account. The API host is how the bot reads
+# it, and is allowed.
+GITHUB_LINK = re.compile(r"(?<!api\.)github\.com|html_url")
 # Anything that looks like a secret itself. A change containing one is
 # discarded, never published.
 SECRET = re.compile(
@@ -120,6 +124,14 @@ def admin_problems(diff):
             for path, line in added_lines(diff) if ADMIN_LIST.search(line)]
 
 
+def github_problems(diff):
+    return [f"{path}: could show members a link to the GitHub repository: "
+            f"{line.strip()[:120]}"
+            for path, line in added_lines(diff)
+            if path.endswith(".py") and not path.startswith("test_")
+            and GITHUB_LINK.search(line)]
+
+
 def contains_secret(text):
     return bool(SECRET.search(text))
 
@@ -142,7 +154,8 @@ def check(base_tree):
     base_rev = _git("rev-parse", "HEAD", cwd=base_tree).strip()
     changed = _git("diff", "--name-only", "--no-renames", base_rev, "HEAD").split()
     diff = _git("diff", "--no-renames", base_rev, "HEAD")
-    problems = path_problems(changed) + access_problems(diff) + admin_problems(diff)
+    problems = (path_problems(changed) + access_problems(diff) + admin_problems(diff)
+                + github_problems(diff))
     try:
         problems += value_problems(snapshot(base_tree), snapshot("."))
     except RuntimeError as e:

@@ -6,7 +6,8 @@ each other in the channel without every message costing an answer.
 
 Each member gets a short memory of their own recent exchanges, forgotten
 after half an hour, and a limit on how often they can ask, because every
-answer costs the owner's AI budget.
+answer costs the owner's AI budget. An admin can switch the limit off with
+/admin chat-limit; the monthly budget in ai.py still caps the spending.
 """
 
 import collections
@@ -14,26 +15,34 @@ import logging
 import time
 
 import discord
+from discord import app_commands
 
 import admins
 import ai
 import assistant
 import layout
-import proposals
 import providers
+import store
 import voting_ui
 
 log = logging.getLogger("chat")
 
-PER_WINDOW, WINDOW = 8, 10 * 60      # messages per member per window
+PER_WINDOW, WINDOW = 20, 10 * 60     # messages per member per window
 MEMORY, MEMORY_TTL = 6, 30 * 60       # turns kept per member, and for how long
 
 _asked = collections.defaultdict(collections.deque)
 _memory = {}
 
 
+def limited():
+    """True unless an admin has switched the limit off."""
+    return store.load("chat", {}).get("limited", True)
+
+
 def allowed(member_id, now):
     """True if this member may ask again now, and counts the question."""
+    if not limited():
+        return True
     asked = _asked[member_id]
     while asked and now - asked[0] > WINDOW:
         asked.popleft()
@@ -110,8 +119,9 @@ def tagged(message, me):
 
 
 class ShipDraft(discord.ui.DynamicItem[discord.ui.Button], template=r"ship:(?P<no>\d+)"):
-    """Ships a code change an admin asked for, without a vote (admins.py).
-    Whether they are an admin is checked again when they press it."""
+    """Does what an admin's draft asks at once, without a vote (admins.py):
+    it is filed as passed and carried out like a passed vote. Whether they
+    are an admin is checked again when they press it."""
 
     def __init__(self, no):
         super().__init__(discord.ui.Button(
@@ -131,28 +141,27 @@ class ShipDraft(discord.ui.DynamicItem[discord.ui.Button], template=r"ship:(?P<n
         if draft["author_id"] != interaction.user.id:
             return await interaction.response.send_message(
                 "Only the member who asked for this draft can ship it.", ephemeral=True)
-        if not admins.is_admin(interaction.user.id) or draft["kind"] != proposals.GENERAL:
+        if not admins.allowed(interaction.user.id, interaction.guild):
             return await interaction.response.send_message(
-                "Only an admin can ship a code change without a vote. Use File it "
-                "instead.", ephemeral=True)
+                "Only an admin can skip the vote. Use File it instead.", ephemeral=True)
         if draft["filed"]:
             return await interaction.response.send_message(
                 f"Already filed as proposal {draft['filed']}.", ephemeral=True)
-        p = await voting_ui.publish(interaction, lambda now: proposals.ship(
-            interaction.user.id, draft["title"], draft["details"], now))
+        p = await voting_ui.publish(interaction, assistant.opener(draft, interaction.user.id),
+                                    by_admin=True)
         if p is not None:
             assistant.mark_filed(self.no, p["no"])
 
 
 def drafts_view(drafts, admin=False):
     """A File it button for each draft, and for an admin, a Ship it button
-    on each code change."""
+    that skips the vote."""
     if not drafts:
         return discord.utils.MISSING
     view = discord.ui.View(timeout=None)
     for draft in drafts[:5]:
         view.add_item(FileDraft(draft["no"], draft["title"]))
-        if admin and draft["kind"] == proposals.GENERAL:
+        if admin:
             view.add_item(ShipDraft(draft["no"]))
     return view
 
@@ -197,10 +206,10 @@ async def on_message(message):
         text += f"\n(Replying to your message: {replied.content[:500]})"
     if message.attachments:
         text += f"\n({len(message.attachments)} attachment(s))"
-    admin = admins.is_admin(message.author.id)
+    admin = admins.allowed(message.author.id, message.guild)
     if admin:
-        text += ("\n(This member is an admin: a general proposal you draft for them also "
-                 "gets a Ship it button, which skips the vote.)")
+        text += ("\n(This member is an admin: every draft you make for them also gets a "
+                 "Ship it button, which does it at once without a vote.)")
     try:
         async with message.channel.typing():
             answer = await assistant.respond(ctx, history(message.author.id, now), text)
@@ -214,6 +223,23 @@ async def on_message(message):
     await message.reply(answer[:2000], view=drafts_view(ctx.drafts, admin),
                         mention_author=False,
                         allowed_mentions=discord.AllowedMentions.none())
+
+
+@admins.group.command(name="chat-limit",
+                      description="Admins: turn the #ask-saheb limit on or off")
+@app_commands.describe(on=f"On: each member can ask {PER_WINDOW} times in "
+                          f"{WINDOW // 60} minutes. Off: no limit.")
+async def chat_limit(interaction: discord.Interaction, on: bool):
+    guild, user = interaction.guild, interaction.user
+    if not admins.allowed(user.id, guild):
+        return await interaction.response.send_message(
+            "Only an admin can change this.", ephemeral=True)
+    store.save("chat", {"limited": on})
+    said = (f"on: each member can ask {PER_WINDOW} times in {WINDOW // 60} minutes"
+            if on else "off")
+    await layout.server_log(guild, f"{user.mention} turned the #ask-saheb limit {said}.")
+    await interaction.response.send_message(f"The #ask-saheb limit is {said}.",
+                                            ephemeral=True)
 
 
 def setup(client):

@@ -19,16 +19,17 @@ This server is an experiment: it is moderated and governed entirely by Saheb
 l Server, an AI bot. There are no human moderators, and apart from the
 admins below, no member has more say than any other.
 
-**The owner.** Discord requires a human owner. The role is purely
-technical: the owner keeps the bot online, pays for its AI and picks the
-admins, and does not moderate, make rules, or overrule votes. On this
-server the owner is just another member with one vote.
+**The owner.** Discord requires a human owner. The owner keeps the bot online, pays for its AI and picks the
+admins, and has the same powers as an admin. Otherwise the owner is a
+member with one vote like everyone else.
 
 **Admins.** Members the owner picks (they have the Admin role; see
-`/admin list`) can have a change to the bot's code made without a vote.
-That is all: server changes, settings, kicks, bans and appeals still need
-a vote. Their changes go through every automatic check, and are posted in
-#proposals and #server-log with who shipped them.
+`/admin list`) look after the server while it's young. They can do
+anything a vote can, at once and without a vote: change channels, roles,
+settings and the rules, kick or ban, or have the bot's code changed. They
+can also take down any open proposal. They act only through the bot,
+never with Discord's own tools, and everything they do is posted in
+#server-log with who did it.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
 passes it messages with flagged words in English or Arabic, and it reads
@@ -61,8 +62,8 @@ one of the bot's settings with `/propose-setting`.
 
 **Votes are carried out automatically.** A passed change to the server,
 like a new channel, is made by the bot at once. Anything else is written
-as a code change, checked automatically and deployed. Every code change is
-public on GitHub.
+as a code change, checked automatically and deployed, and what changed is
+posted under its proposal.
 
 **What votes can't change.** Who the admins are, the bot's access keys, the system that
 updates and rolls back its code, the range each setting can take, the
@@ -144,33 +145,40 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 - **Drafts are filed by the member, not the bot.** The reply carries a
   **File it** button that only the member who asked can press, once.
-- **Admins can skip the vote on a code change.** For an admin (picked by
-  the owner with `/admin add`, see `admins.py`), a general proposal also
-  gets a **Ship it** button: it is posted as already passed, and the
-  self-update workflow writes, checks, reviews and deploys it like any
-  other. Nothing else skips a vote, and the list of admins can't be
-  changed by a code change.
+- **Admins can skip any vote.** For an admin (picked by the owner with
+  `/admin add`, see `admins.py`; the owner counts as one), every draft
+  also gets a **Ship it** button: it is posted as already passed and
+  carried out like a passed vote. A code change still goes through the
+  self-update workflow's checks. `/admin withdraw` takes down any open
+  proposal, `/admin chat-limit` switches the chat limit, and `/admin
+  github` shows admins, and only them, where the code is. Every admin
+  action is posted in `#server-log`. What admins can do can grow by code
+  change; who they are can't.
 - **Votes about a member** (kick, ban) need the member @mentioned and a
   reason, hide their count until they close, need `removal_percent`
   (66% to start, never below 60%) to pass, and the member can't vote on
   them. The member is told why by DM. Immediate danger stays with the
   moderator.
-- **Nobody holds power over anyone.** Roles are created with no
+- **Nobody but the admins holds power over anyone.** Roles are created with no
   permissions, and `guard.py` takes moderation-level permissions off every
   role and channel override whenever one changes, and every hour, however
   they got there, and says so in `#server-log`. That includes pinging
   `@everyone`, which only the bot can do.
-- **What it can't do, whatever anyone says:** give anyone power, act on
-  another member without a vote, change a moderation decision, or skip a
-  vote (admins' Ship it button is code, not a tool). There is no tool for
+- **What it can't do for a member, whatever anyone says:** give anyone
+  power, act on another member without a vote, change a moderation
+  decision, or skip a vote (admins' Ship it button is code, not a tool). There is no tool for
   any of it, and claiming to be the owner
   changes nothing. The channels the bot depends on can't be renamed or
   deleted, even by vote. A code change can't add anything to the personal
   or light tiers: only the owner can, by committing directly.
-- **Costs.** Claude Haiku on the owner's OpenRouter key and monthly
-  budget, about a fifth of a cent per answer. Each member can ask 8 times
-  in 10 minutes, and it remembers their last few exchanges for half an
-  hour.
+- **Costs.** The chat model (`ai.CHAT`, DeepSeek V4.1 Flash, picked with
+  `chat_eval.py`) on the owner's OpenRouter key and monthly budget: about
+  0.02 of a cent per answer, against 0.6 to 0.9 on Claude Haiku, which
+  still does the moderation. The budget
+  records what OpenRouter actually billed. Requests go only to providers
+  with zero data retention: they keep nothing members write. Each member can ask 20
+  times in 10 minutes (an admin can switch this off), and it remembers
+  their last few exchanges for half an hour.
 
 ## What still needs a human
 
@@ -376,6 +384,7 @@ Each proposal is attempted once. To try again, propose it again.
 | `providers.py` | One interface over OpenRouter, Claude, Gemini and Grok |
 | `store.py` | Saves state as JSON files on the volume (protected) |
 | `calibrate.py` | Scores example messages with the real first check |
+| `chat_eval.py` | Compares chat models on example `#ask-saheb` messages: tool, language, speed, cost |
 | `test_*.py` | Tests that need no network, no keys and no Discord server |
 
 ## Running it
@@ -403,6 +412,7 @@ python3 -m venv .venv
 .venv/bin/python -m unittest     # tests
 .venv/bin/python bot.py          # run the bot (needs DISCORD_TOKEN in .env)
 OPENROUTER_API_KEY=sk-or-... .venv/bin/python calibrate.py
+OPENROUTER_API_KEY=sk-or-... .venv/bin/python chat_eval.py   # compare chat models
 ```
 
 ## Hosting on Railway

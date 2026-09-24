@@ -2,8 +2,16 @@
 
 - The first check is TypeSafe's Jev, on OpenRouter's Decisions API. It is
   pinned to one version because the review threshold was tuned on it.
-- The full review is Claude Haiku, through providers.OpenRouter, which also
-  answers members in #ask-saheb.
+- The full review, and the explanation members read, are Claude Haiku,
+  through providers.OpenRouter: rare, and they decide what happens to a
+  member.
+- #ask-saheb is CHAT, which answers far more often and can do only what
+  assistant.py's code allows. chat_eval.py compares candidates for it.
+
+Every call's cost is what OpenRouter says it billed, and the listed prices
+are only a fallback. Every call goes only to providers with zero data
+retention: providers.OpenRouter asks for it, and Jev's only provider
+(TypeSafe) is one.
 
 The server owner sets the key and a monthly budget with /ai-key; paying for
 the AI is part of keeping the bot online. The key is stored in a file only
@@ -22,6 +30,7 @@ import store
 
 FIRST_CHECK = "typesafe/jev-1.13"
 REVIEWER = "anthropic/claude-haiku-4.5"
+CHAT = "deepseek/deepseek-v4.1-flash"  # chosen with chat_eval.py, 2026-09-25
 DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions"
 DEFAULT_BUDGET = 10.0
 
@@ -93,25 +102,32 @@ async def first_check(state, questions, api_key=None):
     return data.get("answers") or {}
 
 
+def cost(model, tokens_in, tokens_out, billed=None):
+    """Dollars for one call: what OpenRouter billed, or an estimate from the
+    listed prices when it didn't say."""
+    if billed is not None:
+        return float(billed)
+    price_in, price_out = providers.prices("openrouter", model)
+    return (tokens_in * price_in + tokens_out * price_out) / 1_000_000
+
+
 async def review(prompt, schema):
     """Haiku's structured answer to `prompt`."""
     now = time.time()
     _ready(now)
-    answer, tokens_in, tokens_out = await providers.OpenRouter(key()).json_answer(
+    answer, tokens_in, tokens_out, billed = await providers.OpenRouter(key()).json_answer(
         REVIEWER, prompt, schema, max_tokens=400)
-    price_in, price_out = providers.prices("openrouter", REVIEWER)
-    _spend((tokens_in * price_in + tokens_out * price_out) / 1_000_000, now)
+    _spend(cost(REVIEWER, tokens_in, tokens_out, billed), now)
     return answer
 
 
 async def converse(system, turns, tools, max_tokens=600):
-    """One turn of conversation with tools, through REVIEWER."""
+    """One turn of conversation with tools, through CHAT."""
     now = time.time()
     _ready(now)
     reply = await providers.OpenRouter(key()).converse(
-        REVIEWER, system, turns, tools=tools, max_tokens=max_tokens)
-    price_in, price_out = providers.prices("openrouter", REVIEWER)
-    _spend((reply.tokens_in * price_in + reply.tokens_out * price_out) / 1_000_000, now)
+        CHAT, system, turns, tools=tools, max_tokens=max_tokens)
+    _spend(cost(CHAT, reply.tokens_in + reply.cache_read, reply.tokens_out, reply.cost), now)
     return reply
 
 

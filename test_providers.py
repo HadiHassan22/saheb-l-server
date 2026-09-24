@@ -36,6 +36,41 @@ class Lookup(unittest.TestCase):
             providers.build("nope", "key")
 
 
+class OpenRouterRequests(unittest.TestCase):
+    def test_every_request_asks_for_the_cost_and_a_private_provider(self):
+        router = providers.OpenRouter("key")
+        for model in ("anthropic/claude-haiku-4.5", "openai/gpt-5-mini",
+                      "deepseek/deepseek-v4.1-flash", "z-ai/glm-5.3-flash"):
+            extra = router._extra(model)
+            self.assertEqual(extra["usage"], {"include": True})
+            self.assertEqual(extra["provider"], {"zdr": True, "data_collection": "deny"})
+        self.assertNotIn("reasoning", router._extra("anthropic/claude-haiku-4.5"))
+        self.assertEqual(router._extra("openai/gpt-5-mini")["reasoning"]["effort"], "minimal")
+        self.assertEqual(router._extra("z-ai/glm-5.3-flash")["reasoning"]["effort"], "minimal")
+        self.assertEqual(router._extra("deepseek/deepseek-v4.1-flash")["reasoning"],
+                         {"enabled": False})
+        self.assertEqual(providers.Grok("key")._extra("grok-4-fast"), {})
+
+    def test_the_budget_records_what_was_billed(self):
+        import ai
+        self.assertEqual(ai.cost("openai/gpt-5-mini", 1000, 100, 0.0042), 0.0042)
+        self.assertAlmostEqual(ai.cost("openai/gpt-5-mini", 1_000_000, 0), 0.25)
+        self.assertAlmostEqual(ai.cost("some/unlisted-model", 1_000_000, 0), 1.00)
+
+
+class ChatEval(unittest.TestCase):
+    def test_the_cases_name_real_tools_and_the_language_check_works(self):
+        import assistant
+        import chat_eval
+        names = {t["name"] for t in assistant.TOOLS} | {chat_eval.TEXT}
+        for label, _, right, _ in chat_eval.CASES:
+            self.assertLessEqual(right, names, label)
+        self.assertEqual(chat_eval.script_of("شو القوانين هون؟"), chat_eval.AR)
+        self.assertEqual(chat_eval.script_of("kifak ya saheb, 3al 8"), chat_eval.LATIN)
+        self.assertIsNone(chat_eval.script_of("👍"))
+        self.assertIn("button", chat_eval.stand_in("draft_proposal"))
+
+
 class Transcripts(unittest.TestCase):
     def conversation(self, raw):
         """`raw` is the tool-calling turn in the provider's own shape."""

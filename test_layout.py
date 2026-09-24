@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import types
 import unittest
+import zlib
 from pathlib import Path
 
 import colors
@@ -53,12 +54,35 @@ class Plan(unittest.TestCase):
 
 class Colors(unittest.TestCase):
     def test_the_list_fits_one_dropdown(self):
-        names = [name for name, _ in colors.COLORS]
+        names = [name for name, _, _ in colors.COLORS]
         self.assertEqual(len(names), len(set(names)))
         self.assertLessEqual(len(names) + 1, 25)  # plus "No color"
         self.assertNotIn(colors.NONE, names)
-        for _, value in colors.COLORS:
+        for name, value, look in colors.COLORS:
             self.assertTrue(0 < value <= 0xFFFFFF)
+            self.assertLessEqual(len(f"{name} ({look})"), 100)  # a /color choice
+
+    def test_each_color_gets_a_dot_of_its_own_color(self):
+        names = [colors.swatch_name(n, v) for n, v, _ in colors.COLORS]
+        self.assertEqual(len(names), len(set(names)))
+        for name in names:  # Discord's rule for emoji names
+            self.assertRegex(name, r"^[A-Za-z0-9_]{2,32}$")
+        self.assertEqual(colors.swatch_name("Za'atar", 0x8A9A5B), "swatch_zaatar_8a9a5b")
+        png = colors.dot_png(0x26A69A, size=8)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertLess(len(colors.dot_png(0x26A69A)), 256 * 1024)  # Discord's limit
+        rows = zlib.decompress(png[png.index(b"IDAT") + 4:png.index(b"IEND") - 8])
+        self.assertIn(bytes.fromhex("26a69aff"), rows)
+        self.assertEqual(rows[1:5], bytes.fromhex("26a69a00"))  # a corner is clear
+
+    def test_every_color_says_what_it_looks_like(self):
+        select = colors.Picker().children[0]
+        self.assertEqual(select.options[3].description, "Teal")
+        text = colors.picker_text({"Qadisha": 11, "Cedar": 12})
+        self.assertIn("<@&11> teal", text)
+        self.assertIn("<@&12> dark green", text)
+        self.assertLessEqual(len(colors.picker_text(
+            {n: 10**18 for n, _, _ in colors.COLORS})), 2000)
 
     def test_picking_a_color_swaps_it_and_leaves_other_roles_alone(self):
         color_ids = {1, 2, 3}

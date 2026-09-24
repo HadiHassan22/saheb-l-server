@@ -1,18 +1,19 @@
-"""Admins: members the owner picks, who can have a code change made
-without a vote. PROTECTED: see PROTECTED.md.
+"""Who the admins are. PROTECTED: see PROTECTED.md.
 
-This is the one exception to one member, one vote, and it is kept narrow:
+Admins are the exception to one member, one vote: they keep the server
+under control while it's young. What they can do is not in this file and
+not protected (an admin's code change can extend it); who they are is:
 
 - Only the server owner adds or removes admins, with /admin. The list is
-  kept by the bot. The Admin role on Discord only shows who is on it: like
-  every role here it gives no Discord powers (guard.py), and holding it
-  without being on the list does nothing.
-- An admin can skip the vote on a code change (a general proposal drafted
-  in #ask-saheb), nothing else. Server changes, settings, kicks, bans and
-  appeals still go to a vote.
-- A shipped change goes through the same self-update workflow as a voted
-  one: the tests, the protected-core check, the security review, and the
-  rollback. It is posted in #proposals and #server-log with who shipped it.
+  kept by the bot, and no other file may touch it. The Admin role on
+  Discord only shows who is on it: like every role here it gives no
+  Discord powers (guard.py), and holding it without being on the list does
+  nothing. The owner counts as an admin without being on it.
+- Admins act through the bot, never with Discord's own tools, so every
+  admin action is posted in #server-log with who did it. Today they can do
+  anything a vote can, at once (Ship it, in chat.py), withdraw any open
+  proposal (/admin withdraw, voting_ui.py) and switch #ask-saheb's rate
+  limit (/admin chat-limit, chat.py).
 """
 
 import logging
@@ -34,6 +35,13 @@ def ids():
 
 def is_admin(user_id):
     return user_id in ids()
+
+
+def allowed(user_id, guild):
+    """True if `user_id` may use admin powers in `guild`: an admin, or the
+    owner, and only in the home server."""
+    return (guild is not None and guild.id == layout.home_id()
+            and (is_admin(user_id) or user_id == guild.owner_id))
 
 
 def _save(found):
@@ -80,7 +88,7 @@ def _refusal(interaction):
 
 
 group = app_commands.Group(
-    name="admin", description="Admins can have a code change made without a vote")
+    name="admin", description="Admins: act without a vote; the owner picks them")
 
 
 @group.command(name="add", description="Owner only: make a member an admin")
@@ -99,7 +107,7 @@ async def add_admin(interaction: discord.Interaction, member: discord.Member):
         log.warning(f"couldn't give {member.id} the admin role: {e!r}")
     await layout.server_log(
         interaction.guild, f"{interaction.user.mention} made {member.mention} an admin: "
-        "they can have a code change made without a vote.")
+        "they can do what a vote can, without one.")
     await interaction.response.send_message(f"{member.display_name} is now an admin.",
                                             ephemeral=True)
 

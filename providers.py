@@ -52,6 +52,7 @@ class Reply:
     cache_read: int = 0   # served from cache, billed at a fraction
     cache_write: int = 0  # written to cache, billed at a small premium
     raw: object = None  # the provider's own copy of this turn, replayed verbatim
+    cost: float = None  # dollars, when the provider says what it billed
 
     # tokens_in always means *uncached* input, whatever the provider reports.
     # Gemini and Grok count cached tokens inside their prompt total and
@@ -240,6 +241,10 @@ class Grok:
             "Content-Type": "application/json",
         }
 
+    def _extra(self, model):
+        """Fields this host adds to every request for `model`."""
+        return {}
+
     async def _post(self, path, payload):
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
             async with session.post(
@@ -283,6 +288,7 @@ class Grok:
             "messages": self._messages(system, turns),
             "max_tokens": max_tokens,
             "temperature": temperature,
+            **self._extra(model),
         }
         if tools:
             payload["tools"] = [
@@ -306,6 +312,7 @@ class Grok:
             tokens_in=max(prompt - cached, 0),
             tokens_out=usage.get("completion_tokens", 0) or 0,
             cache_read=cached,
+            cost=usage.get("cost"),
         )
         choices = data.get("choices") or []
         if not choices:
@@ -588,16 +595,37 @@ class OpenRouter(Grok):
     base = "https://openrouter.ai/api/v1"
     default_model = "anthropic/claude-haiku-4.5"
     # Haiku 4.5's rates, the default model's. A different model is counted
-    # at these unless listed.
+    # at these unless listed. Only a fallback: OpenRouter says what each
+    # call cost (`Reply.cost`), and that is what the budget records.
     price_in = 1.00
     price_out = 5.00
     model_prices = {
         "anthropic/claude-haiku-4.5": (1.00, 5.00),
+        "openai/gpt-5-mini": (0.25, 2.00),
+        "deepseek/deepseek-v4.1-flash": (0.15, 0.60),
+        "z-ai/glm-5.3-flash": (0.045, 0.60),
     }
     cache_read_rate = 0.10
     cache_write_rate = 1.25
 
+    def _extra(self, model):
+        """What every request adds: the real cost back, only providers with
+        zero data retention (they keep nothing members write, so can't
+        train on it either), and no reasoning.
+        Reasoning shares the reply's max_tokens, and a reasoning turn can
+        spend all of it and answer nothing. Claude is sent as it always has
+        been: without the field, it answers without thinking."""
+        extra = {"usage": {"include": True},
+                 "provider": {"zdr": True, "data_collection": "deny"}}
+        if model.startswith(("openai/", "z-ai/")):
+            # GPT-5 mini and GLM can't switch reasoning off, only down.
+            extra["reasoning"] = {"effort": "minimal", "exclude": True}
+        elif not model.startswith("anthropic/"):
+            extra["reasoning"] = {"enabled": False}
+        return extra
+
     async def json_answer(self, model, prompt, schema, max_tokens=300):
+        """(answer, tokens in, tokens out, cost in dollars or None)."""
         # A strict schema rather than Grok's json_object: OpenRouter passes
         # it through to models that support structured outputs.
         data = await self._post(
@@ -611,6 +639,7 @@ class OpenRouter(Grok):
                     "json_schema": {"name": "answer", "strict": True,
                                     "schema": _closed(schema)},
                 },
+                **self._extra(model),
             },
         )
         usage = data.get("usage") or {}
@@ -620,6 +649,7 @@ class OpenRouter(Grok):
             _loads(text),
             usage.get("prompt_tokens", 0) or 0,
             usage.get("completion_tokens", 0) or 0,
+            usage.get("cost"),
         )
 
 

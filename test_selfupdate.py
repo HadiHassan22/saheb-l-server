@@ -54,6 +54,15 @@ class ProtectedPaths(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].startswith("chat.py: touches the list of admins"))
 
+    def test_code_that_could_link_members_to_github_is_refused(self):
+        diff = ("+++ b/updates.py\n+    text = pr['html_url']\n"
+                '+PULLS = "https://api.github.com/repos/x/pulls"\n'
+                "+++ b/chat.py\n+see https://github.com/someone/repo\n"
+                "+++ b/README.md\n+[code](https://github.com/o/r)\n"
+                "+++ b/test_chat.py\n+url = 'https://github.com/o/r'\n")
+        found = protected.github_problems(diff)
+        self.assertEqual([f.split(":")[0] for f in found], ["updates.py", "chat.py"])
+
     def test_similar_names_are_not_protected(self):
         self.assertEqual(protected.path_problems(["ai_helpers.py", "github.py"]), [])
 
@@ -171,10 +180,25 @@ class Stages(unittest.TestCase):
                          updates.ROLLED_BACK)
         self.assertIsNone(updates.stage_of(pr("revert-proposal-1", "open")))
 
-    def test_every_stage_has_a_message(self):
+    def test_every_stage_has_a_message_and_none_links_to_github(self):
         for stage in updates.ORDER:
-            self.assertIn("Proposal 3", updates.message(3, stage, "https://x").replace(
-                "proposal 3", "Proposal 3"))
+            said = updates.message(3, stage, "Added a trivia game.")
+            self.assertIn("Proposal 3", said.replace("proposal 3", "Proposal 3"))
+            self.assertNotIn("http", said)
+        self.assertIn("trivia", updates.message(3, updates.NO_CHANGE, "trivia"))
+        self.assertNotIn("trivia", updates.message(3, updates.WRITING, "trivia"))
+
+    def test_members_get_the_summary_without_links(self):
+        body = ("Proposal 3. It passed a vote in the server.\n\nAdded trivia, see "
+                "https://github.com/o/r/pull/3 and <https://example.com>.\n\n"
+                "**Why it wasn't merged**\n- The tests fail.")
+        summary = updates.summary_of({"body": body})
+        self.assertTrue(summary.startswith("Added trivia"))
+        self.assertNotIn("github", summary)
+        self.assertNotIn("http", summary)
+        self.assertIn("The tests fail.", summary)
+        self.assertEqual(updates.summary_of({"body": None}), "")
+        self.assertLessEqual(len(updates.summary_of({"body": "x" * 5000})), 1501)
 
 
 class WithTempData(unittest.TestCase):
@@ -195,6 +219,12 @@ class Progress(WithTempData):
         self.assertTrue(updates.advance(1, updates.MERGED, pr("proposal-1", merged=True)))
         self.assertFalse(updates.advance(1, updates.WRITING))
         self.assertTrue(updates.advance(1, updates.ROLLED_BACK))
+
+    def test_admins_can_find_a_proposals_code_change(self):
+        updates.advance(5, updates.WRITING, pr("proposal-5", "open"))
+        self.assertEqual(updates.link(5), "https://github.com/o/r/pull/proposal-5")
+        self.assertIsNone(updates.link(6))
+        self.assertTrue(updates.link().startswith("https://github.com/"))
 
     def test_the_running_commit_names_its_proposal(self):
         updates.advance(4, updates.MERGED, pr("proposal-4", merged=True, sha="1234567abc"))
@@ -218,7 +248,8 @@ class Passed(WithTempData):
                          {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False})
 
     def test_a_change_an_admin_shipped_is_offered_at_once(self):
-        proposals.ship(7, "Dark mode", "Add it.", NOW)
+        proposals.pass_now(proposals.open_proposal(7, "Dark mode", "Add it.", NOW)["no"],
+                           7, NOW)
         self.assertEqual(health.passed_proposals(),
                          [{"no": 1, "title": "Dark mode", "details": "Add it.",
                            "shipped": True}])

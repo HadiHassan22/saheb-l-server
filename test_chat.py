@@ -26,6 +26,7 @@ import colors
 import layout
 import proposals
 import providers
+import settings
 import store
 import voting_ui
 
@@ -218,6 +219,38 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertTrue(chat.allowed(2, NOW + 10))
         self.assertTrue(chat.allowed(1, NOW + chat.WINDOW + 1))
 
+    def test_an_admin_can_switch_the_limit_off(self):
+        for i in range(chat.PER_WINDOW):
+            chat.allowed(3, NOW + i)
+        self.assertFalse(chat.allowed(3, NOW + 30))
+        store.save("chat", {"limited": False})
+        self.assertTrue(all(chat.allowed(3, NOW + 30) for _ in range(100)))
+
+    async def switch(self, user_id, on):
+        sent = []
+        interaction = types.SimpleNamespace(
+            guild=types.SimpleNamespace(id=99, owner_id=1), user=types.SimpleNamespace(
+                id=user_id, mention=f"<@{user_id}>"),
+            response=types.SimpleNamespace(
+                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+        with mock.patch.object(layout, "home_id", lambda: 99), \
+                mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            await chat.chat_limit.callback(interaction, on)
+        return sent[0], logged
+
+    async def test_only_admins_and_the_owner_switch_the_limit(self):
+        said, logged = await self.switch(7, False)
+        self.assertIn("Only an admin", said)
+        logged.assert_not_awaited()
+        self.assertTrue(chat.limited())
+        admins.add(7)
+        said, logged = await self.switch(7, False)
+        self.assertIn("off", said)
+        self.assertFalse(chat.limited())
+        self.assertIn("<@7> turned", logged.call_args.args[1])
+        said, _ = await self.switch(1, True)
+        self.assertTrue(chat.limited())
+
     def test_memory_keeps_recent_text_and_forgets_after_a_while(self):
         chat.remember(5, NOW, "Hadi: hi", "Hello!")
         self.assertEqual([t["role"] for t in chat.history(5, NOW + 60)], ["user", "model"])
@@ -238,7 +271,7 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         message = types.SimpleNamespace(
             content=content, attachments=[], reference=reference, channel=ask,
             author=types.SimpleNamespace(id=7, bot=False, display_name="Rami"),
-            guild=types.SimpleNamespace(id=99, me=me),
+            guild=types.SimpleNamespace(id=99, me=me, owner_id=1),
             mentions=[me if m == "me" else m for m in mentions],
             role_mentions=[role if r == "me" else r for r in roles],
             reply=mock.AsyncMock())
@@ -309,23 +342,38 @@ class Admins(WithTempData, unittest.IsolatedAsyncioTestCase):
     def buttons(self, view):
         return [item.item.custom_id for item in view.children]
 
-    def test_admins_also_get_ship_it_on_code_changes_only(self):
+    def test_admins_get_ship_it_on_every_draft(self):
         general = assistant.save_draft(7, proposals.GENERAL, "Dark mode", "Add it.", {}, NOW)
         setting = assistant.save_draft(7, proposals.SETTING, "Quorum", "", {}, NOW)
         drafts = [general, setting]
         g, s = general["no"], setting["no"]
         self.assertEqual(self.buttons(chat.drafts_view(drafts)), [f"draft:{g}", f"draft:{s}"])
         self.assertEqual(self.buttons(chat.drafts_view(drafts, admin=True)),
-                         [f"draft:{g}", f"ship:{g}", f"draft:{s}"])
+                         [f"draft:{g}", f"ship:{g}", f"draft:{s}", f"ship:{s}"])
+
+    def test_admin_powers_are_for_admins_and_the_owner_in_the_home_server(self):
+        home = types.SimpleNamespace(id=99, owner_id=1)
+        admins.add(7)
+        with mock.patch.object(layout, "home_id", lambda: 99):
+            self.assertTrue(admins.allowed(7, home))
+            self.assertTrue(admins.allowed(1, home))
+            self.assertFalse(admins.allowed(8, home))
+            self.assertFalse(admins.allowed(7, types.SimpleNamespace(id=5, owner_id=1)))
+            self.assertFalse(admins.allowed(7, None))
 
     async def ship(self, draft_no, user_id):
         sent = []
         interaction = types.SimpleNamespace(
-            user=types.SimpleNamespace(id=user_id),
+            user=types.SimpleNamespace(id=user_id), guild=types.SimpleNamespace(id=99, owner_id=1),
             response=types.SimpleNamespace(
                 send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
-        publish = mock.AsyncMock(side_effect=lambda i, opener: opener(NOW))
-        with mock.patch("voting_ui.publish", publish):
+
+        async def publish(i, opener, by_admin=False):
+            p = opener(NOW)
+            return proposals.pass_now(p["no"], i.user.id, NOW) if by_admin else p
+        publish = mock.AsyncMock(side_effect=publish)
+        with mock.patch("voting_ui.publish", publish), \
+                mock.patch.object(layout, "home_id", lambda: 99):
             await chat.ShipDraft(draft_no).callback(interaction)
         return sent, publish
 
@@ -341,22 +389,28 @@ class Admins(WithTempData, unittest.IsolatedAsyncioTestCase):
         sent, _ = await self.ship(draft["no"], 7)
         self.assertIn("Already filed", sent[0])
 
-    async def test_admins_can_only_ship_code_changes_and_only_their_own(self):
+    async def test_an_admin_can_pass_a_setting_but_only_their_own_draft(self):
         admins.add(7)
         admins.add(8)
-        setting = assistant.save_draft(7, proposals.SETTING, "Quorum", "", {}, NOW)
-        sent, publish = await self.ship(setting["no"], 7)
-        self.assertIn("Only an admin can ship a code change", sent[0])
-        general = assistant.save_draft(7, proposals.GENERAL, "Dark mode", "Add it.", {}, NOW)
-        sent, publish = await self.ship(general["no"], 8)
+        setting = assistant.save_draft(7, proposals.SETTING, "Quorum", "",
+                                       {"setting": "quorum", "value": 8}, NOW)
+        sent, publish = await self.ship(setting["no"], 8)
         self.assertIn("Only the member", sent[0])
         publish.assert_not_awaited()
+        await self.ship(setting["no"], 7)
+        self.assertEqual(settings.current()["quorum"], 8)
 
-    def test_a_shipped_card_says_so_and_has_no_vote_buttons(self):
-        p = proposals.ship(7, "Dark mode", "Add it.", NOW)
+    def test_a_card_says_which_admin_passed_or_withdrew_it(self):
+        p = proposals.pass_now(proposals.open_proposal(7, "Dark mode", "Add it.", NOW)["no"],
+                               7, NOW)
         embed = voting_ui.card(p)
-        self.assertIn("Shipped by an admin", embed.fields[-1].value)
-        self.assertIn("skipped the vote", embed.footer.text)
+        self.assertIn("Passed by an admin", embed.fields[-1].value)
+        self.assertIn("still goes through every automatic check", embed.footer.text)
+        q = proposals.withdraw(proposals.open_proposal(8, "Spam", "Spam.", NOW)["no"],
+                               7, "Off topic", NOW)
+        embed = voting_ui.card(q)
+        self.assertIn("Withdrawn by an admin", embed.fields[-2].value)
+        self.assertEqual(embed.fields[-1].value, "Off topic")
 
 
 class Counting(unittest.TestCase):

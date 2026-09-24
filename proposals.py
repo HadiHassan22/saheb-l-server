@@ -30,6 +30,7 @@ OPEN = "open"
 PASSED = "passed"
 FAILED = "failed"
 NO_QUORUM = "no_quorum"
+WITHDRAWN = "withdrawn"  # taken down by an admin before the vote ended
 
 DAY = 24 * 60 * 60
 FOUNDING = 7 * DAY  # from when the bot joined the server
@@ -152,19 +153,34 @@ def open_proposal(author_id, title, details, now, setting=None, value=None):
     return _file(data, current, author_id, proposal, now)
 
 
-def ship(author_id, title, details, now):
-    """File a code change an admin approved without a vote (admins.py). It
-    is passed from the start, so the self-update workflow picks it up.
-    Checking that the author is an admin is the caller's job."""
-    title, details = title.strip(), details.strip()
-    if not title or not details:
-        raise Refused("A code change needs a title and details.")
+def pass_now(no, admin_id, now):
+    """Pass a just-opened proposal on an admin's word, without a vote
+    (admins.py), and return it. A setting change is applied, as at close;
+    anything else is carried out by whatever carries out a passed vote.
+    Checking that `admin_id` is an admin is the caller's job."""
     data = _load()
-    proposal = _file(data, settings.current(), author_id, {
-        "kind": GENERAL, "title": title, "details": details,
-    }, now)
-    proposal.update(status=PASSED, shipped_by=author_id, closes_at=now, closed_at=now,
-                    totals={"yes": 0, "no": 0})
+    proposal = data["proposals"][str(no)]
+    if proposal["status"] != OPEN:
+        raise Refused("Voting on this proposal has closed.")
+    proposal.update(status=PASSED, shipped_by=admin_id, closes_at=now, closed_at=now,
+                    totals={"yes": 0, "no": 0}, votes={})
+    _apply(proposal)
+    _save(data)
+    return proposal
+
+
+def withdraw(no, admin_id, reason, now):
+    """Take an open proposal down on an admin's word, and return it. Its
+    ballots are destroyed as at close, and nothing is carried out."""
+    data = _load()
+    proposal = data["proposals"].get(str(no))
+    if proposal is None:
+        raise Refused("That proposal doesn't exist.")
+    if proposal["status"] != OPEN:
+        raise Refused("Only an open proposal can be withdrawn.")
+    yes, against = tally(proposal)
+    proposal.update(status=WITHDRAWN, withdrawn_by=admin_id, note=reason.strip() or None,
+                    totals={"yes": yes, "no": against}, closed_at=now, votes={})
     _save(data)
     return proposal
 
@@ -266,10 +282,15 @@ def close(no, now):
         closed_at=now,
         votes={},
     )
+    _apply(proposal)
+    _save(data)
+    return proposal
+
+
+def _apply(proposal):
+    """Apply a passed setting change."""
     if proposal["status"] == PASSED and proposal["kind"] == SETTING:
         try:
             settings.apply(proposal["setting"], proposal["value"])
         except ValueError as e:
             proposal["note"] = f"Passed, but could not be applied: {e}."
-    _save(data)
-    return proposal

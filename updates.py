@@ -15,6 +15,11 @@ outcome as a pull request:
 The bot reads these from GitHub's public API every five minutes, with no
 key: the repository is public. When the commit it is running is a
 proposal's, it says that proposal is live.
+
+Members get the status and the summary written for them, never a link:
+the repository is under the owner's own GitHub account, and linking it
+from the server would tie the two together. Admins can ask for the link
+with /admin github, which only they see.
 """
 
 import logging
@@ -22,8 +27,11 @@ import os
 import re
 
 import aiohttp
+import discord
+from discord import app_commands
 from discord.ext import tasks
 
+import admins
 import health
 import proposals
 import store
@@ -62,19 +70,31 @@ def stage_of(pr):
     return NO_CHANGE if "no-change" in labels else FAILED
 
 
-def message(no, stage, url):
-    return {
-        WRITING: f"The change for proposal {no} is written and being checked: <{url}>",
-        MERGED: f"Proposal {no} is written as code, passed every check, and is "
-                f"deploying: <{url}>",
+LINK = re.compile(r"<?https?://\S+>?")
+
+
+def summary_of(pr):
+    """What the workflow wrote for members, without the line saying how the
+    proposal was approved and without any link."""
+    body = (pr or {}).get("body") or ""
+    kept = body.split("\n\n", 1)[1] if body.startswith("Proposal ") and "\n\n" in body else body
+    kept = LINK.sub("", kept).strip()
+    return kept[:1500] + ("…" if len(kept) > 1500 else "")
+
+
+def message(no, stage, summary=""):
+    said = {
+        WRITING: f"The change for proposal {no} is written and being checked.",
+        MERGED: f"Proposal {no} is written as code, passed every check, and is deploying.",
         LIVE: f"Proposal {no} is live.",
         NO_CHANGE: f"Proposal {no} needs no code change, or can't be done without "
-                   f"touching the protected core. Why: <{url}>",
-        FAILED: f"Proposal {no} couldn't be put into effect: the change failed a "
-                f"check. Details: <{url}>",
-        ROLLED_BACK: f"Proposal {no} was rolled back: the new version didn't start. "
-                     f"Details: <{url}>",
+                   "touching the protected core.",
+        FAILED: f"Proposal {no} couldn't be put into effect: the change failed a check.",
+        ROLLED_BACK: f"Proposal {no} was rolled back: the new version didn't start.",
     }[stage]
+    if summary and stage in (MERGED, NO_CHANGE, FAILED):
+        said += "\n\n" + summary
+    return said
 
 
 def _saved():
@@ -89,6 +109,8 @@ def advance(no, stage, pr=None):
     if old is not None and ORDER.index(stage) <= ORDER.index(old):
         return False
     saved["stages"][str(no)] = stage
+    if pr and pr.get("html_url") and stage != ROLLED_BACK:
+        saved.setdefault("links", {})[str(no)] = pr["html_url"]
     if stage == MERGED and pr and pr.get("merge_commit_sha"):
         saved["commits"][pr["merge_commit_sha"][:7]] = no
     store.save("updates", saved)
@@ -120,7 +142,7 @@ async def follow(client):
     try:
         live = running_proposal()
         if live is not None and advance(live, LIVE):
-            await _say(client, live, message(live, LIVE, ""))
+            await _say(client, live, message(live, LIVE))
         for pr in reversed(await _pull_requests()):
             no = proposal_of(pr)
             stage = stage_of(pr)
@@ -130,10 +152,31 @@ async def follow(client):
             if not p or p["status"] != proposals.PASSED:
                 continue
             if advance(no, stage, pr):
-                await _say(client, no, message(no, stage, pr["html_url"]))
+                await _say(client, no, message(no, stage, summary_of(pr)))
     except Exception as e:
         # GitHub limits unauthenticated calls; the next round tries again.
         log.warning(f"could not follow updates: {e!r}")
+
+
+def link(no=None):
+    """The repository, or proposal `no`'s pull request if it has one."""
+    if no is not None:
+        return _saved().get("links", {}).get(str(no))
+    return f"https://github.com/{REPO}"
+
+
+@admins.group.command(name="github",
+                      description="Admins: the code behind the bot, seen only by you")
+@app_commands.describe(proposal="A proposal's number, for its code change (optional)")
+async def github(interaction: discord.Interaction, proposal: int = None):
+    if not admins.allowed(interaction.user.id, interaction.guild):
+        return await interaction.response.send_message(
+            "Only admins can see where the code is kept.", ephemeral=True)
+    found = link(proposal)
+    text = (f"Proposal {proposal}'s code change: <{found}>" if found
+            else f"Proposal {proposal} has no code change yet." if proposal is not None
+            else f"The code: <{link()}>")
+    await interaction.response.send_message(text, ephemeral=True)
 
 
 def setup(client):

@@ -42,6 +42,36 @@ class WithTempData(unittest.TestCase):
                            excerpt="ya 7mar", decided_by=judge.FIRST_CHECK), **fields})
 
 
+class Withdrawing(WithTempData, unittest.IsolatedAsyncioTestCase):
+    async def withdraw(self, user_id, no):
+        sent, card = [], mock.Mock(edit=mock.AsyncMock())
+        channel = mock.Mock(fetch_message=mock.AsyncMock(return_value=card))
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(id=user_id, mention=f"<@{user_id}>"),
+            guild=types.SimpleNamespace(id=99, owner_id=1),
+            client=types.SimpleNamespace(get_channel=lambda cid: channel),
+            response=types.SimpleNamespace(
+                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+        with mock.patch.object(layout, "home_id", lambda: 99), \
+                mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            await voting_ui.withdraw.callback(interaction, no, "Filed by mistake")
+        return sent[0], card, logged
+
+    async def test_an_admin_withdraws_an_appeal_and_the_case_can_be_appealed_again(self):
+        case = self.case()
+        p = proposals.open_appeal(APPELLANT, case["no"], SUBJECT, "Appeal", "Details", NOW)
+        cases.update(case["no"], appeal=p["no"])
+        said, card, logged = await self.withdraw(APPELLANT, p["no"])
+        self.assertIn("Only an admin", said)
+        logged.assert_not_awaited()
+        said, card, logged = await self.withdraw(1, p["no"])  # the owner
+        self.assertIn("withdrawn", said)
+        card.edit.assert_awaited_once()
+        self.assertIn("Filed by mistake", logged.call_args.args[1])
+        self.assertEqual(proposals.get(p["no"])["status"], proposals.WITHDRAWN)
+        self.assertIsNone(cases.why_not_appealable(cases.get(case["no"])))
+
+
 class Rules(WithTempData):
     def test_each_standing_case_can_be_appealed_once(self):
         case = self.case()

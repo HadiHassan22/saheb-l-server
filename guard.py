@@ -5,6 +5,8 @@ for. This takes every permission that would let a member act on others or
 on the server away from every role and every channel override, however it
 got there: a vote, a code change, or someone with the owner's account.
 The bot's own role, which Discord manages, is the only one left with them.
+The Admin role is stripped like any other: admins (admins.py) act through
+the bot, which posts what they do in #server-log.
 
 It runs when the bot starts, every hour, and whenever a role or channel
 changes. The owner's own powers come from owning the server, not from a

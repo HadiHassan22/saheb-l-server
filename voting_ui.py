@@ -1,6 +1,7 @@
 """The Discord side of voting: /propose, /propose-setting, /settings, the
 card each proposal is posted as, its vote buttons, and closing votes when
-time is up.
+time is up. Also what admins can do to proposals (admins.py): pass one at
+once, and take one down with /admin withdraw.
 """
 
 import logging
@@ -10,6 +11,8 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+import admins
+import cases
 import layout
 import proposals
 import settings
@@ -21,11 +24,13 @@ COLOURS = {
     proposals.PASSED: discord.Colour.green(),
     proposals.FAILED: discord.Colour.red(),
     proposals.NO_QUORUM: discord.Colour.light_grey(),
+    proposals.WITHDRAWN: discord.Colour.dark_grey(),
 }
 RESULTS = {
     proposals.PASSED: "Passed",
     proposals.FAILED: "Failed",
     proposals.NO_QUORUM: "Not enough votes",
+    proposals.WITHDRAWN: "Withdrawn",
 }
 # What Yes and No mean on each kind of proposal.
 CHOICES = {proposals.APPEAL: {"yes": "overturn", "no": "keep"}}
@@ -62,8 +67,18 @@ def card(p):
             inline=False,
         )
     elif p.get("shipped_by"):
-        embed.add_field(name="Result", value="**Shipped by an admin** without a vote",
+        embed.add_field(name="Result",
+                        value=f"**Passed by an admin**, <@{p['shipped_by']}>, without a vote",
                         inline=False)
+        if p.get("note"):
+            embed.add_field(name="Note", value=p["note"], inline=False)
+    elif p.get("withdrawn_by"):
+        embed.add_field(name="Result",
+                        value=f"**Withdrawn by an admin**, <@{p['withdrawn_by']}>, before "
+                              "the vote ended",
+                        inline=False)
+        if p.get("note"):
+            embed.add_field(name="Why", value=p["note"][:1000], inline=False)
     else:
         embed.add_field(
             name="Result",
@@ -76,8 +91,12 @@ def card(p):
               "who joined in the server's first week, can vote. "
               "Discuss in the thread.")
     if p.get("shipped_by"):
-        footer = ("An admin skipped the vote on this code change. It still goes through "
-                  "every automatic check, and progress is posted here.")
+        footer = ("An admin skipped the vote. " + (
+            "The code change still goes through every automatic check, and progress "
+            "is posted here." if p["kind"] == proposals.GENERAL
+            else "The bot carries it out at once, and says so here."))
+    elif p.get("withdrawn_by"):
+        footer = "An admin withdrew this proposal. Its ballots were not counted."
     elif p["kind"] == proposals.APPEAL:
         footer += " The member this case is about can't vote on it."
     embed.set_footer(text=footer)
@@ -139,10 +158,12 @@ def people(guild):
     return count - 1 if count else None
 
 
-async def publish(interaction, opener, guild=None):
+async def publish(interaction, opener, guild=None, by_admin=False):
     """Open a proposal with `opener(now)` and post it in the proposals
     channel, with a thread for discussion. Returns the proposal, or None if
-    nothing was opened. `guild` is for interactions that arrive by DM."""
+    nothing was opened. `guild` is for interactions that arrive by DM.
+    `by_admin` passes it at once and carries it out, as a passed vote
+    would be; checking that the member is an admin is the caller's job."""
     await interaction.response.defer(ephemeral=True, thinking=True)
     channel = layout.channel(guild or interaction.guild, "proposals")
     if channel is None:
@@ -152,9 +173,12 @@ async def publish(interaction, opener, guild=None):
         )
     try:
         p = opener(int(time.time()))
+        if by_admin:
+            p = proposals.pass_now(p["no"], interaction.user.id, int(time.time()))
     except proposals.Refused as e:
         return await interaction.followup.send(str(e), ephemeral=True)
-    p = proposals.fit_quorum(p["no"], people(channel.guild))
+    if not by_admin:
+        p = proposals.fit_quorum(p["no"], people(channel.guild))
     view = vote_buttons(p) if p["status"] == proposals.OPEN else discord.utils.MISSING
     message = await channel.send(embed=card(p), view=view)
     proposals.attach_message(p["no"], channel.id, message.id)
@@ -164,11 +188,55 @@ async def publish(interaction, opener, guild=None):
         log.warning(f"no thread for proposal {p['no']}: {e!r}")
     await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
                                     ephemeral=True)
-    if p.get("shipped_by"):
+    if by_admin:
         await layout.server_log(
-            channel.guild, f"<@{p['shipped_by']}> shipped proposal {p['no']} without a vote, "
-            f"as an admin: {message.jump_url}")
+            channel.guild, f"<@{p['shipped_by']}> passed proposal {p['no']} ({p['title']}) "
+            f"without a vote, as an admin: {message.jump_url}")
+        await carry_out(interaction.client, p, channel.guild)
     return p
+
+
+async def carry_out(client, p, guild):
+    """Do what a proposal an admin passed says, as when a vote passes it."""
+    if p["kind"] == proposals.SETTING:
+        await layout.post_texts(guild)  # #welcome quotes the settings
+    await after_close(client, p)
+
+
+async def after_close(client, p):
+    for hook in AFTER_CLOSE:
+        try:
+            await hook(client, p)
+        except Exception as e:
+            log.error(f"{hook.__name__} failed for proposal {p['no']}: {e!r}")
+
+
+@admins.group.command(name="withdraw",
+                      description="Admins: take an open proposal down without a vote")
+@app_commands.describe(proposal="The proposal's number", reason="Why (shown on its card)")
+async def withdraw(interaction: discord.Interaction, proposal: int, reason: str = ""):
+    guild = interaction.guild
+    if not admins.allowed(interaction.user.id, guild):
+        return await interaction.response.send_message(
+            "Only an admin can withdraw a proposal.", ephemeral=True)
+    try:
+        p = proposals.withdraw(proposal, interaction.user.id, reason[:500], int(time.time()))
+    except proposals.Refused as e:
+        return await interaction.response.send_message(str(e), ephemeral=True)
+    if p["kind"] == proposals.APPEAL:
+        cases.update(p["case_no"], appeal=None)  # so it can be appealed again
+    channel = interaction.client.get_channel(p.get("channel_id") or 0)
+    if channel is not None:
+        try:
+            message = await channel.fetch_message(p["message_id"])
+            await message.edit(embed=card(p), view=None)
+        except discord.HTTPException as e:
+            log.warning(f"proposal {p['no']}'s card wasn't updated: {e!r}")
+    await layout.server_log(
+        guild, f"{interaction.user.mention} withdrew proposal {p['no']} ({p['title']}) "
+        "as an admin" + (f": {reason.strip()}" if reason.strip() else "."))
+    await interaction.response.send_message(f"Proposal {p['no']} is withdrawn.",
+                                            ephemeral=True)
 
 
 class ProposeForm(discord.ui.Modal, title="New proposal"):
@@ -262,11 +330,7 @@ async def close_due(client):
             await post_result(client, p)
         except Exception as e:
             log.error(f"the result of proposal {p['no']} was not posted: {e!r}")
-        for hook in AFTER_CLOSE:
-            try:
-                await hook(client, p)
-            except Exception as e:
-                log.error(f"{hook.__name__} failed for proposal {p['no']}: {e!r}")
+        await after_close(client, p)
 
 
 async def reply_to(client, p, text):

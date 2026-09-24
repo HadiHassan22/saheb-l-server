@@ -127,16 +127,31 @@ class Voting(WithTempData):
             proposals.cast(99, 10, VETERAN, "yes", NOW)
 
 
-class Shipping(WithTempData):
-    def test_a_shipped_change_is_passed_from_the_start_and_needs_words(self):
-        p = proposals.ship(7, " Dark mode ", " Add it. ", NOW)
-        self.assertEqual((p["status"], p["shipped_by"], p["title"]),
-                         (proposals.PASSED, 7, "Dark mode"))
+class Admins(WithTempData):
+    def test_an_admin_passes_a_proposal_at_once_and_a_setting_applies(self):
+        p = proposals.pass_now(self.general()["no"], 7, NOW)
+        self.assertEqual((p["status"], p["shipped_by"], p["totals"]),
+                         (proposals.PASSED, 7, {"yes": 0, "no": 0}))
         self.assertEqual(proposals.due(NOW + 2 * DAY), [])
         with self.assertRaisesRegex(proposals.Refused, "has closed"):
             proposals.cast(p["no"], 10, VETERAN, "no", NOW)
-        with self.assertRaises(proposals.Refused):
-            proposals.ship(7, "", "Add it.", NOW)
+        with self.assertRaisesRegex(proposals.Refused, "has closed"):
+            proposals.pass_now(p["no"], 7, NOW)
+        s = proposals.open_proposal(1, "", "", NOW, setting="quorum", value=8)
+        proposals.pass_now(s["no"], 7, NOW)
+        self.assertEqual(settings.current()["quorum"], 8)
+
+    def test_an_admin_withdraws_an_open_proposal_and_nothing_is_counted(self):
+        p = self.general()
+        self.vote(p["no"], {10: "yes", 11: "no"})
+        w = proposals.withdraw(p["no"], 7, " Duplicate ", NOW + 60)
+        self.assertEqual((w["status"], w["withdrawn_by"], w["note"], w["votes"]),
+                         (proposals.WITHDRAWN, 7, "Duplicate", {}))
+        self.assertEqual(proposals.due(NOW + 2 * DAY), [])
+        with self.assertRaisesRegex(proposals.Refused, "Only an open"):
+            proposals.withdraw(p["no"], 7, "", NOW)
+        with self.assertRaisesRegex(proposals.Refused, "doesn't exist"):
+            proposals.withdraw(99, 7, "", NOW)
 
 
 class SmallServer(WithTempData):
@@ -150,7 +165,7 @@ class SmallServer(WithTempData):
         self.assertEqual(proposals.fit_quorum(p["no"], 3)["quorum"], 3)
         self.vote(p["no"], {10: "yes", 11: "yes", 12: "no"})
         self.assertEqual(proposals.close(p["no"], NOW + DAY)["status"], proposals.PASSED)
-        shipped = proposals.ship(7, "Dark mode", "Add it.", NOW)
+        shipped = proposals.pass_now(self.general(author=7)["no"], 7, NOW)
         self.assertEqual(proposals.fit_quorum(shipped["no"], 3)["quorum"], 5)
 
 
