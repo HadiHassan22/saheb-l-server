@@ -16,13 +16,19 @@ This is the text the bot posts in `#welcome`, with the current settings
 filled in.
 
 This server is an experiment: it is moderated and governed entirely by Saheb
-l Server, an AI bot. There are no human moderators, and no member has
-more say than any other.
+l Server, an AI bot. There are no human moderators, and apart from the
+admins below, no member has more say than any other.
 
 **The owner.** Discord requires a human owner. The role is purely
-technical: the owner keeps the bot online and pays for its AI, and does not
-moderate, make rules, or overrule votes. On this server the owner is just
-another member with one vote.
+technical: the owner keeps the bot online, pays for its AI and picks the
+admins, and does not moderate, make rules, or overrule votes. On this
+server the owner is just another member with one vote.
+
+**Admins.** Members the owner picks (they have the Admin role; see
+`/admin list`) can have a change to the bot's code made without a vote.
+That is all: server changes, settings, kicks, bans and appeals still need
+a vote. Their changes go through every automatic check, and are posted in
+#proposals and #server-log with who shipped them.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
 passes it messages with flagged words in English or Arabic, and it reads
@@ -32,7 +38,8 @@ repeated violations. Every action is posted in `#mod-log` with the
 reasoning.
 
 **Talk to the bot.** Ask Saheb l Server anything in `#ask-saheb`, in
-English, Arabic or Arabizi. It changes your name color when you ask (or
+English, Arabic or Arabizi: tag it or reply to one of its messages. It
+changes your name color when you ask (or
 pick one in `#roles`), answers questions about the server, and drafts
 proposals for anything that affects everyone. It never files a proposal
 until you press the button, and it can't change anything for everyone
@@ -46,15 +53,18 @@ and can overturn any action.
 one of the bot's settings with `/propose-setting`.
 
 - Voting stays open for 24 hours.
-- A proposal needs at least 5 votes to count, and more than 50% yes to pass.
-- Members who have been here for 7 days can vote.
+- A proposal needs at least 5 votes to count (or half the server's
+  members, if that's fewer, but never under 3), and more than 50% yes to
+  pass.
+- Members who have been here for 7 days can vote. Everyone who joined in
+  the server's first week can vote right away.
 
 **Votes are carried out automatically.** A passed change to the server,
 like a new channel, is made by the bot at once. Anything else is written
 as a code change, checked automatically and deployed. Every code change is
 public on GitHub.
 
-**What votes can't change.** The bot's access keys, the system that
+**What votes can't change.** Who the admins are, the bot's access keys, the system that
 updates and rolls back its code, the range each setting can take, the
 safety floor (blocking scams, phone numbers and sexual content involving
 minors, and the self-harm support line), and anything Discord's Terms of
@@ -104,8 +114,9 @@ first one it's invited to becomes its home, and it leaves any other.
 ## Talking to the bot
 
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
-answers in the language they use. It is the only channel where the bot
-reads ordinary messages. The model understands the request, and code
+answers in the language they use. It answers only messages that tag it or
+reply to it, so members can also talk to each other there. It is the only
+channel where the bot reads ordinary messages. The model understands the request, and code
 decides what is allowed: every tool is in one of four tiers, fixed in
 `assistant.py`.
 
@@ -133,6 +144,12 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 - **Drafts are filed by the member, not the bot.** The reply carries a
   **File it** button that only the member who asked can press, once.
+- **Admins can skip the vote on a code change.** For an admin (picked by
+  the owner with `/admin add`, see `admins.py`), a general proposal also
+  gets a **Ship it** button: it is posted as already passed, and the
+  self-update workflow writes, checks, reviews and deploys it like any
+  other. Nothing else skips a vote, and the list of admins can't be
+  changed by a code change.
 - **Votes about a member** (kick, ban) need the member @mentioned and a
   reason, hide their count until they close, need `removal_percent`
   (66% to start, never below 60%) to pass, and the member can't vote on
@@ -145,7 +162,8 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   `@everyone`, which only the bot can do.
 - **What it can't do, whatever anyone says:** give anyone power, act on
   another member without a vote, change a moderation decision, or skip a
-  vote. There is no tool for any of it, and claiming to be the owner
+  vote (admins' Ship it button is code, not a tool). There is no tool for
+  any of it, and claiming to be the owner
   changes nothing. The channels the bot depends on can't be renamed or
   deleted, even by vote. A code change can't add anything to the personal
   or light tiers: only the owner can, by committing directly.
@@ -334,7 +352,8 @@ Each proposal is attempted once. To try again, propose it again.
 | File | What it does |
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
-| `chat.py` | `#ask-saheb`: rate limits, memory, and the File it button |
+| `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
+| `admins.py` | The admins the owner picks, `/admin` (protected) |
 | `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
@@ -363,7 +382,8 @@ Each proposal is attempted once. To try again, propose it again.
 
 1. **In the [Discord developer portal](https://discord.com/developers/applications):**
    create an application and add a bot. Under **Bot**, turn on **Message
-   Content Intent** and copy the token.
+   Content Intent** and **Server Members Intent** (the bot won't start
+   without them), and copy the token.
 2. **Create a brand-new server** and invite the bot with the `bot` and
    `applications.commands` scopes and the **Administrator** permission.
    Invite it to this server only: the first server it joins becomes its

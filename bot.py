@@ -19,6 +19,7 @@ HERE = Path(__file__).parent
 load_dotenv(HERE / ".env")
 
 import actions  # noqa: E402  (store.py reads its directory from the environment)
+import admins  # noqa: E402
 import appeals  # noqa: E402
 import chat  # noqa: E402
 import colors  # noqa: E402
@@ -48,6 +49,10 @@ class Bot(discord.Client):
         # the few before it, and the bot answer in #ask-saheb. Messages
         # anywhere else are never read.
         intents.message_content = True
+        # Privileged too (Bot -> Server Members Intent). It lets the bot see
+        # who is in the server, so a proposal's quorum counts people and not
+        # other bots (proposals.quorum_for).
+        intents.members = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.started_at = datetime.now(timezone.utc)
@@ -56,6 +61,7 @@ class Bot(discord.Client):
     async def setup_hook(self):
         await health.serve(self)
         voting_ui.setup(self, self.tree)
+        admins.setup(self.tree)
         moderator.setup(self.tree)
         appeals.setup(self, self.tree)
         colors.setup(self, self.tree)

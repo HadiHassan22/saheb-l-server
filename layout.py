@@ -47,8 +47,8 @@ PLAN = [
     ]),
     ("Governance", [
         room("ask-saheb",
-             topic="Talk to Saheb l Server: ask how things work, change your name "
-                   "color, or have it draft a proposal.", slowmode=5),
+             topic="Tag Saheb l Server or reply to it: ask how things work, change "
+                   "your name color, or have it draft a proposal.", slowmode=5),
         room("proposals", THREADS_ONLY,
              "Use /propose to add one. Discuss each proposal in its thread."),
     ]),

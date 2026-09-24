@@ -5,8 +5,8 @@ from telling whether a new version came up, and so from rolling it back.
 - GET /healthz answers 200 once connected to Discord, and 503 before.
   Railway waits for it before sending traffic to a new version, and the
   self-update workflow reads `commit` from it to confirm what is live.
-- GET /api/passed lists the proposals that passed and may need a code
-  change. The self-update workflow reads it. Everything in it is already
+- GET /api/passed lists the proposals that passed, or that an admin
+  shipped without a vote, and may need a code change. The self-update workflow reads it. Everything in it is already
   public in #proposals.
 
 Railway sets PORT; without it (running locally) nothing is served.
@@ -29,7 +29,8 @@ def passed_proposals():
     found = [p for p in proposals.all_proposals()
              if p["kind"] == proposals.GENERAL and p["status"] == proposals.PASSED]
     found.sort(key=lambda p: p["no"])
-    return [{"no": p["no"], "title": p["title"], "details": p["details"]} for p in found]
+    return [{"no": p["no"], "title": p["title"], "details": p["details"],
+             "shipped": bool(p.get("shipped_by"))} for p in found]
 
 
 async def serve(client):

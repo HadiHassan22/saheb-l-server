@@ -61,6 +61,9 @@ def card(p):
                    f"{p['pass_percent']}% {say['yes']}"),
             inline=False,
         )
+    elif p.get("shipped_by"):
+        embed.add_field(name="Result", value="**Shipped by an admin** without a vote",
+                        inline=False)
     else:
         embed.add_field(
             name="Result",
@@ -69,9 +72,13 @@ def card(p):
         )
         if p.get("note"):
             embed.add_field(name="Note", value=p["note"], inline=False)
-    footer = (f"Secret ballot. Members of {p['voter_min_days']}+ days can vote. "
+    footer = (f"Secret ballot. Members of {p['voter_min_days']}+ days, and everyone "
+              "who joined in the server's first week, can vote. "
               "Discuss in the thread.")
-    if p["kind"] == proposals.APPEAL:
+    if p.get("shipped_by"):
+        footer = ("An admin skipped the vote on this code change. It still goes through "
+                  "every automatic check, and progress is posted here.")
+    elif p["kind"] == proposals.APPEAL:
         footer += " The member this case is about can't vote on it."
     embed.set_footer(text=footer)
     return embed
@@ -98,10 +105,13 @@ class VoteButton(discord.ui.DynamicItem[discord.ui.Button],
 
     async def callback(self, interaction):
         joined = getattr(interaction.user, "joined_at", None)
+        me = interaction.guild.me if interaction.guild else None
+        founded = me.joined_at if me else None
         try:
             p = proposals.cast(self.no, interaction.user.id,
                                joined.timestamp() if joined else None,
-                               self.choice, time.time())
+                               self.choice, time.time(),
+                               founded.timestamp() if founded else None)
         except proposals.Refused as e:
             return await interaction.response.send_message(str(e), ephemeral=True)
         await interaction.response.send_message(
@@ -120,6 +130,15 @@ def vote_buttons(p):
     return view
 
 
+def people(guild):
+    """How many people, not bots, are in the server. Until Discord has sent
+    the member list, every member but this bot, or None if unknown."""
+    if guild.chunked:
+        return sum(not m.bot for m in guild.members)
+    count = guild.member_count
+    return count - 1 if count else None
+
+
 async def publish(interaction, opener, guild=None):
     """Open a proposal with `opener(now)` and post it in the proposals
     channel, with a thread for discussion. Returns the proposal, or None if
@@ -135,7 +154,9 @@ async def publish(interaction, opener, guild=None):
         p = opener(int(time.time()))
     except proposals.Refused as e:
         return await interaction.followup.send(str(e), ephemeral=True)
-    message = await channel.send(embed=card(p), view=vote_buttons(p))
+    p = proposals.fit_quorum(p["no"], people(channel.guild))
+    view = vote_buttons(p) if p["status"] == proposals.OPEN else discord.utils.MISSING
+    message = await channel.send(embed=card(p), view=view)
     proposals.attach_message(p["no"], channel.id, message.id)
     try:
         await message.create_thread(name=f"Proposal {p['no']}: {p['title']}"[:100])
@@ -143,6 +164,10 @@ async def publish(interaction, opener, guild=None):
         log.warning(f"no thread for proposal {p['no']}: {e!r}")
     await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
                                     ephemeral=True)
+    if p.get("shipped_by"):
+        await layout.server_log(
+            channel.guild, f"<@{p['shipped_by']}> shipped proposal {p['no']} without a vote, "
+            f"as an admin: {message.jump_url}")
     return p
 
 

@@ -9,3 +9,6 @@ logs/
 .venv/
 __pycache__/
 .selfupdate-summary.md
+
+# the owner's notes for Claude Code; never read by the self-update workflow
+CLAUDE.local.md

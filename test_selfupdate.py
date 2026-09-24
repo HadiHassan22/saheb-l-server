@@ -39,6 +39,21 @@ class ProtectedPaths(unittest.TestCase):
             "changes a protected file: guard.py",
         ])
 
+    def test_files_claude_code_reads_by_itself_are_protected(self):
+        for path in ("CLAUDE.md", "CLAUDE.local.md", ".claude/settings.json",
+                     ".agents/skills/x/SKILL.md", ".mcp.json"):
+            self.assertEqual(len(protected.path_problems([path])), 1, path)
+        self.assertEqual(protected.path_problems(["docs/CLAUDE.md.txt"]), [])
+
+    def test_the_admins_are_protected(self):
+        self.assertEqual(protected.path_problems(["admins.py"]),
+                         ["changes a protected file: admins.py"])
+        diff = ('+++ b/chat.py\n+store.save("admins", everyone)\n'
+                "+ok = admins.is_admin(member.id)\n-store.load('admins', [])\n")
+        found = protected.admin_problems(diff)
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("chat.py: touches the list of admins"))
+
     def test_similar_names_are_not_protected(self):
         self.assertEqual(protected.path_problems(["ai_helpers.py", "github.py"]), [])
 
@@ -200,7 +215,13 @@ class Passed(WithTempData):
             proposals.close(no, NOW + proposals.DAY)
         self.assertEqual([p["no"] for p in health.passed_proposals()], [1, 3])
         self.assertEqual(health.passed_proposals()[0],
-                         {"no": 1, "title": "Idea 0", "details": "Do it."})
+                         {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False})
+
+    def test_a_change_an_admin_shipped_is_offered_at_once(self):
+        proposals.ship(7, "Dark mode", "Add it.", NOW)
+        self.assertEqual(health.passed_proposals(),
+                         [{"no": 1, "title": "Dark mode", "details": "Add it.",
+                           "shipped": True}])
 
 
 if __name__ == "__main__":

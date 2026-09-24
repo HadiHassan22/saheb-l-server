@@ -100,6 +100,19 @@ class Voting(WithTempData):
         with self.assertRaisesRegex(proposals.Refused, "7 days"):
             proposals.cast(1, 12, None, "yes", NOW)
 
+    def test_whoever_joins_in_the_founding_week_can_vote_at_once(self):
+        founded = NOW - 3 * DAY  # the bot joined three days ago
+        self.general()
+        proposals.cast(1, 10, NOW - 60, "yes", NOW, founded)
+        proposals.cast(1, 11, founded - DAY, "yes", NOW, founded)  # was here first
+        later = founded + 10 * DAY
+        self.general(now=later)
+        proposals.cast(2, 10, NOW - 60, "yes", later + 60, founded)  # keeps the right
+        with self.assertRaisesRegex(proposals.Refused, "7 days"):
+            proposals.cast(2, 12, founded + 8 * DAY, "yes", later + 60, founded)
+        with self.assertRaisesRegex(proposals.Refused, "7 days"):
+            proposals.cast(2, 13, None, "yes", later + 60, founded)
+
     def test_a_vote_can_be_changed_and_counts_once(self):
         self.general()
         self.vote(1, {10: "yes"})
@@ -112,6 +125,33 @@ class Voting(WithTempData):
             proposals.cast(1, 10, VETERAN, "yes", NOW + DAY)
         with self.assertRaisesRegex(proposals.Refused, "exist"):
             proposals.cast(99, 10, VETERAN, "yes", NOW)
+
+
+class Shipping(WithTempData):
+    def test_a_shipped_change_is_passed_from_the_start_and_needs_words(self):
+        p = proposals.ship(7, " Dark mode ", " Add it. ", NOW)
+        self.assertEqual((p["status"], p["shipped_by"], p["title"]),
+                         (proposals.PASSED, 7, "Dark mode"))
+        self.assertEqual(proposals.due(NOW + 2 * DAY), [])
+        with self.assertRaisesRegex(proposals.Refused, "has closed"):
+            proposals.cast(p["no"], 10, VETERAN, "no", NOW)
+        with self.assertRaises(proposals.Refused):
+            proposals.ship(7, "", "Add it.", NOW)
+
+
+class SmallServer(WithTempData):
+    def test_the_quorum_is_at_most_half_the_server_and_never_below_the_floor(self):
+        self.assertEqual([proposals.quorum_for(5, n) for n in (1, 3, 6, 7, 9, 500)],
+                         [3, 3, 3, 4, 5, 5])
+        self.assertEqual(proposals.quorum_for(5, None), 5)
+
+    def test_a_proposal_opens_with_the_quorum_for_the_server_it_is_in(self):
+        p = self.general()
+        self.assertEqual(proposals.fit_quorum(p["no"], 3)["quorum"], 3)
+        self.vote(p["no"], {10: "yes", 11: "yes", 12: "no"})
+        self.assertEqual(proposals.close(p["no"], NOW + DAY)["status"], proposals.PASSED)
+        shipped = proposals.ship(7, "Dark mode", "Add it.", NOW)
+        self.assertEqual(proposals.fit_quorum(shipped["no"], 3)["quorum"], 5)
 
 
 class Outcome(unittest.TestCase):

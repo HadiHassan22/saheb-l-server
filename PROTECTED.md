@@ -15,7 +15,9 @@ in the repository's history.
 | `ai.py`, `store.py` | Where the AI key is kept and how it is used, and how private files are written. |
 | `health.py` | The health check. Rollback relies on it to tell whether a new version came up. |
 | `guard.py` | Takes moderation-level permissions off every role and channel override, so no member ever holds power over another. |
+| `admins.py` | Who the admins are, and that only the owner picks them. No other file may touch the stored list of admins either. |
 | `railway.json`, `railpack.json` | How the bot is deployed and health-checked. |
+| `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `.agents/`, `.mcp.json` | Claude Code reads these by itself on every self-update run. A change here would instruct every later run. |
 
 ## Values that can't be changed
 
@@ -46,6 +48,9 @@ them with the version currently running.
 ## What no change may do
 
 - Give any role or member power over others: roles here are cosmetic.
+  The one exception is set here, not by vote: admins the owner picks
+  (`admins.py`) can skip the vote on a code change, which still goes
+  through every check below. They can't skip any other vote.
 
 - Read, print, store or send any key or token: the Discord token, the AI
   key, or any other secret. New code may not read environment variables

@@ -9,6 +9,13 @@ while a vote is running would change what that vote needs mid-count.
 Ballots are secret. Who voted which way is kept only while the vote is
 open, so each person can change their vote, and is deleted at close,
 leaving the totals.
+
+A new server has nobody who has been in it long enough to vote. So
+everyone who joins in the bot's first week in the server (the founding
+week) can vote at once, and keeps that right; after it, newcomers wait
+the usual time. A small server can't reach the quorum either, so the
+quorum a proposal opens with is at most half the server's members, and
+never below the lowest quorum the setting allows.
 """
 
 import settings
@@ -25,6 +32,7 @@ FAILED = "failed"
 NO_QUORUM = "no_quorum"
 
 DAY = 24 * 60 * 60
+FOUNDING = 7 * DAY  # from when the bot joined the server
 
 
 class Refused(Exception):
@@ -144,6 +152,44 @@ def open_proposal(author_id, title, details, now, setting=None, value=None):
     return _file(data, current, author_id, proposal, now)
 
 
+def ship(author_id, title, details, now):
+    """File a code change an admin approved without a vote (admins.py). It
+    is passed from the start, so the self-update workflow picks it up.
+    Checking that the author is an admin is the caller's job."""
+    title, details = title.strip(), details.strip()
+    if not title or not details:
+        raise Refused("A code change needs a title and details.")
+    data = _load()
+    proposal = _file(data, settings.current(), author_id, {
+        "kind": GENERAL, "title": title, "details": details,
+    }, now)
+    proposal.update(status=PASSED, shipped_by=author_id, closes_at=now, closed_at=now,
+                    totals={"yes": 0, "no": 0})
+    _save(data)
+    return proposal
+
+
+def quorum_for(quorum, members):
+    """The quorum for a server of `members` people: the setting, or half
+    the members rounded up if that's fewer, never below the setting's
+    floor. `members` is None if unknown."""
+    if members is None:
+        return quorum
+    floor = settings.SETTINGS["quorum"]["min"]
+    return max(floor, min(quorum, -(-members // 2)))
+
+
+def fit_quorum(no, members):
+    """Scale a just-opened proposal's quorum to the server's size, and
+    return the proposal."""
+    data = _load()
+    proposal = data["proposals"][str(no)]
+    if proposal["status"] == OPEN:
+        proposal["quorum"] = quorum_for(proposal["quorum"], members)
+        _save(data)
+    return proposal
+
+
 def attach_message(no, channel_id, message_id):
     data = _load()
     proposal = data["proposals"][str(no)]
@@ -152,9 +198,17 @@ def attach_message(no, channel_id, message_id):
     _save(data)
 
 
-def cast(no, voter_id, joined_at, choice, now):
+def founder(joined_at, founded_at):
+    """True if the member joined during the founding week. `founded_at` is
+    when the bot joined the server, or None if unknown."""
+    return (joined_at is not None and founded_at is not None
+            and joined_at < founded_at + FOUNDING)
+
+
+def cast(no, voter_id, joined_at, choice, now, founded_at=None):
     """Record or change a vote and return the proposal. `joined_at` is when
-    the voter joined the server, or None if unknown."""
+    the voter joined the server and `founded_at` when the bot did, either
+    None if unknown."""
     if choice not in ("yes", "no"):
         raise ValueError(choice)
     data = _load()
@@ -166,7 +220,8 @@ def cast(no, voter_id, joined_at, choice, now):
     if voter_id in proposal.get("excluded", []):
         raise Refused("Nobody votes on their own case.")
     min_days = proposal["voter_min_days"]
-    if joined_at is None or now - joined_at < min_days * DAY:
+    if not founder(joined_at, founded_at) and (
+            joined_at is None or now - joined_at < min_days * DAY):
         raise Refused(f"You can vote once you've been in the server for "
                       f"{min_days} days.")
     proposal["votes"][str(voter_id)] = choice

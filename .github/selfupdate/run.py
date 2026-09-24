@@ -84,8 +84,15 @@ def claude(prompt):
     print(result.stdout[-5000:])
 
 
+def approval(p):
+    """How the proposal was approved, in a sentence."""
+    if p.get("shipped"):
+        return "An admin the server owner picked approved it without a vote."
+    return "It passed a vote in the server."
+
+
 def implement_prompt(p):
-    return f"""You are carrying out a change to Saheb l Server, a Discord bot that governs a server. Its members voted for the proposal below. Make the code change it asks for in this repository.
+    return f"""You are carrying out a change to Saheb l Server, a Discord bot that governs a server. {approval(p)} The proposal is below. Make the code change it asks for in this repository.
 
 - Read README.md and PROTECTED.md first. Never edit the files PROTECTED.md lists, never change the values it protects, and never read or write secrets, environment variables, or anything outside this repository. A change that does is rejected automatically.
 - Make the smallest change that does what the proposal says, in the style of the code around it. Add or update tests (test_*.py) and the README where behaviour changes.
@@ -148,7 +155,7 @@ def record(p, branch, outcome, body):
     labels = ["self-update"] + ([outcome] if outcome in LABELS else [])
     url = gh("pr", "create", "--base", "main", "--head", branch,
              "--title", f"Proposal {p['no']}: {p['title']}"[:250],
-             "--body", f"Proposal {p['no']} passed a vote in the server.\n\n{body}",
+             "--body", f"Proposal {p['no']}. {approval(p)}\n\n{body}",
              *sum((["--label", label] for label in labels), []))
     if outcome != "merged":
         gh("pr", "close", url)
@@ -211,7 +218,7 @@ def attempt(p, branch):
     if not problems:
         import review  # needs the bot's dependencies, which the workflow installs
         approved, found = asyncio.run(review.review(
-            f"Proposal {p['no']}: {p['title']}\n\n{p['details']}", diff))
+            f"Proposal {p['no']}: {p['title']}\n({approval(p)})\n\n{p['details']}", diff))
         if not approved:
             problems += found or ["The security review did not approve it."]
     if problems:

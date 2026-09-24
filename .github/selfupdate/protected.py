@@ -13,7 +13,10 @@ import subprocess
 import sys
 
 PROTECTED_PATHS = (".github/", "PROTECTED.md", "ai.py", "store.py", "health.py",
-                   "guard.py", "railway.json", "railpack.json")
+                   "guard.py", "admins.py", "railway.json", "railpack.json",
+                   # Claude Code reads these by itself on every run, so a change
+                   # here would instruct every later self-update.
+                   "CLAUDE.md", "CLAUDE.local.md", ".claude/", ".agents/", ".mcp.json")
 
 # Read out of each tree by importing it, so the values compared are the
 # ones the bot would actually run with.
@@ -43,6 +46,9 @@ ACCESS = re.compile(
     r"|ANTHROPIC_API_KEY|\bai\.key\b|\bai\._secrets\b|store\.load\(\s*['\"]ai['\"]"
     r"|ai\.json|\.http\.token|\beval\(|\bexec\(|subprocess|__import__|importlib"
     r"|/proc/|os\.system|os\.popen")
+# Added lines that name the stored list of admins, which only admins.py
+# (and so only the owner, with /admin) may change.
+ADMIN_LIST = re.compile(r"""['"]admins(\.json)?['"]""")
 # Anything that looks like a secret itself. A change containing one is
 # discarded, never published.
 SECRET = re.compile(
@@ -109,6 +115,11 @@ def access_problems(diff):
             for path, line in added_lines(diff) if ACCESS.search(line)]
 
 
+def admin_problems(diff):
+    return [f"{path}: touches the list of admins: {line.strip()[:120]}"
+            for path, line in added_lines(diff) if ADMIN_LIST.search(line)]
+
+
 def contains_secret(text):
     return bool(SECRET.search(text))
 
@@ -131,7 +142,7 @@ def check(base_tree):
     base_rev = _git("rev-parse", "HEAD", cwd=base_tree).strip()
     changed = _git("diff", "--name-only", "--no-renames", base_rev, "HEAD").split()
     diff = _git("diff", "--no-renames", base_rev, "HEAD")
-    problems = path_problems(changed) + access_problems(diff)
+    problems = path_problems(changed) + access_problems(diff) + admin_problems(diff)
     try:
         problems += value_problems(snapshot(base_tree), snapshot("."))
     except RuntimeError as e:

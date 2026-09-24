@@ -6,6 +6,7 @@ Fake Discord objects and fake model replies; no network.
 """
 
 import asyncio
+import contextlib
 import json
 import shutil
 import tempfile
@@ -17,6 +18,7 @@ from unittest import mock
 import discord
 
 import actions
+import admins
 import ai
 import assistant
 import chat
@@ -25,6 +27,7 @@ import layout
 import proposals
 import providers
 import store
+import voting_ui
 
 NOW = 1_800_000_000
 
@@ -220,6 +223,51 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t["role"] for t in chat.history(5, NOW + 60)], ["user", "model"])
         self.assertEqual(chat.history(5, NOW + chat.MEMORY_TTL + 1), [])
 
+    async def say(self, content, mentions=(), roles=(), reply_to=None):
+        """Post `content` in #ask-saheb and return what the bot answered, or
+        None if it stayed quiet."""
+        role = mock.Mock(spec=discord.Role, id=600)
+        role.is_bot_managed.return_value = True
+        me = types.SimpleNamespace(id=500, roles=[role])
+        ask = types.SimpleNamespace(id=5, typing=contextlib.nullcontext,
+                                    fetch_message=mock.AsyncMock(return_value=reply_to))
+        reference = None
+        if reply_to is not None:
+            reference = types.SimpleNamespace(message_id=reply_to.id, resolved=None,
+                                              cached_message=None)
+        message = types.SimpleNamespace(
+            content=content, attachments=[], reference=reference, channel=ask,
+            author=types.SimpleNamespace(id=7, bot=False, display_name="Rami"),
+            guild=types.SimpleNamespace(id=99, me=me),
+            mentions=[me if m == "me" else m for m in mentions],
+            role_mentions=[role if r == "me" else r for r in roles],
+            reply=mock.AsyncMock())
+        respond = mock.AsyncMock(return_value="Hi Rami")
+        with mock.patch.object(layout, "home_id", lambda: 99), \
+                mock.patch.object(layout, "channel", lambda g, name: ask), \
+                mock.patch.object(assistant, "respond", respond):
+            await chat.on_message(message)
+        if not respond.await_count:
+            message.reply.assert_not_awaited()
+            return None
+        return respond.call_args.args[2]
+
+    async def test_it_answers_only_when_tagged_or_replied_to(self):
+        self.assertIsNone(await self.say("anyone here?"))
+        friend = types.SimpleNamespace(id=8, display_name="Maya")
+        self.assertIsNone(await self.say("<@8> hi", mentions=[friend]))
+        self.assertEqual(await self.say("<@500> what's the quorum?", mentions=["me"]),
+                         "what's the quorum?")
+        self.assertEqual(await self.say("<@&600>  hello", roles=["me"]), "hello")
+        theirs = mock.Mock(spec=discord.Message, id=70, content="nice",
+                           author=types.SimpleNamespace(id=8))
+        self.assertIsNone(await self.say("agreed", reply_to=theirs))
+        mine = mock.Mock(spec=discord.Message, id=71, content="The quorum is 5.",
+                         author=types.SimpleNamespace(id=500))
+        text = await self.say("and to pass?", reply_to=mine)
+        self.assertIn("and to pass?", text)
+        self.assertIn("The quorum is 5.", text)
+
     async def press(self, draft_no, user_id):
         sent = []
         interaction = types.SimpleNamespace(
@@ -240,6 +288,86 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(assistant.get_draft(draft["no"])["filed"], 1)
         sent, _ = await self.press(draft["no"], 7)
         self.assertIn("Already filed", sent[0])
+
+
+class Admins(WithTempData, unittest.IsolatedAsyncioTestCase):
+    def test_only_the_owner_picks_admins_in_the_home_server(self):
+        home = types.SimpleNamespace(id=99, owner_id=1)
+        asking = lambda user, g=home: types.SimpleNamespace(
+            guild=g, user=types.SimpleNamespace(id=user))
+        with mock.patch.object(layout, "home_id", lambda: 99):
+            self.assertIsNone(admins._refusal(asking(1)))
+            self.assertIn("owner", admins._refusal(asking(2)))
+            self.assertIn("server itself",
+                          admins._refusal(asking(1, types.SimpleNamespace(id=5, owner_id=1))))
+        self.assertTrue(admins.add(7))
+        self.assertFalse(admins.add(7))
+        self.assertTrue(admins.is_admin(7))
+        self.assertTrue(admins.remove(7))
+        self.assertFalse(admins.is_admin(7))
+
+    def buttons(self, view):
+        return [item.item.custom_id for item in view.children]
+
+    def test_admins_also_get_ship_it_on_code_changes_only(self):
+        general = assistant.save_draft(7, proposals.GENERAL, "Dark mode", "Add it.", {}, NOW)
+        setting = assistant.save_draft(7, proposals.SETTING, "Quorum", "", {}, NOW)
+        drafts = [general, setting]
+        g, s = general["no"], setting["no"]
+        self.assertEqual(self.buttons(chat.drafts_view(drafts)), [f"draft:{g}", f"draft:{s}"])
+        self.assertEqual(self.buttons(chat.drafts_view(drafts, admin=True)),
+                         [f"draft:{g}", f"ship:{g}", f"draft:{s}"])
+
+    async def ship(self, draft_no, user_id):
+        sent = []
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(id=user_id),
+            response=types.SimpleNamespace(
+                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+        publish = mock.AsyncMock(side_effect=lambda i, opener: opener(NOW))
+        with mock.patch("voting_ui.publish", publish):
+            await chat.ShipDraft(draft_no).callback(interaction)
+        return sent, publish
+
+    async def test_ship_it_checks_the_admin_again_when_pressed(self):
+        draft = assistant.save_draft(7, proposals.GENERAL, "Dark mode", "Add it.", {}, NOW)
+        sent, publish = await self.ship(draft["no"], 7)
+        self.assertIn("Only an admin", sent[0])
+        publish.assert_not_awaited()
+        admins.add(7)
+        _, publish = await self.ship(draft["no"], 7)
+        p = proposals.get(assistant.get_draft(draft["no"])["filed"])
+        self.assertEqual((p["status"], p["shipped_by"]), (proposals.PASSED, 7))
+        sent, _ = await self.ship(draft["no"], 7)
+        self.assertIn("Already filed", sent[0])
+
+    async def test_admins_can_only_ship_code_changes_and_only_their_own(self):
+        admins.add(7)
+        admins.add(8)
+        setting = assistant.save_draft(7, proposals.SETTING, "Quorum", "", {}, NOW)
+        sent, publish = await self.ship(setting["no"], 7)
+        self.assertIn("Only an admin can ship a code change", sent[0])
+        general = assistant.save_draft(7, proposals.GENERAL, "Dark mode", "Add it.", {}, NOW)
+        sent, publish = await self.ship(general["no"], 8)
+        self.assertIn("Only the member", sent[0])
+        publish.assert_not_awaited()
+
+    def test_a_shipped_card_says_so_and_has_no_vote_buttons(self):
+        p = proposals.ship(7, "Dark mode", "Add it.", NOW)
+        embed = voting_ui.card(p)
+        self.assertIn("Shipped by an admin", embed.fields[-1].value)
+        self.assertIn("skipped the vote", embed.footer.text)
+
+
+class Counting(unittest.TestCase):
+    def test_the_quorum_counts_people_not_bots(self):
+        members = [types.SimpleNamespace(bot=b) for b in (False, False, False, True, True)]
+        loaded = types.SimpleNamespace(chunked=True, members=members, member_count=5)
+        self.assertEqual(voting_ui.people(loaded), 3)
+        loading = types.SimpleNamespace(chunked=False, members=[], member_count=5)
+        self.assertEqual(voting_ui.people(loading), 4)
+        unknown = types.SimpleNamespace(chunked=False, members=[], member_count=None)
+        self.assertIsNone(voting_ui.people(unknown))
 
 
 class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
