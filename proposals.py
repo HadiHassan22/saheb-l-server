@@ -17,6 +17,7 @@ import store
 GENERAL = "general"
 SETTING = "setting"
 APPEAL = "appeal"
+ACTION = "action"  # a server change (actions.py) carried out when it passes
 
 OPEN = "open"
 PASSED = "passed"
@@ -91,6 +92,23 @@ def open_appeal(author_id, case_no, subject_id, title, details, now):
         "kind": APPEAL, "title": title, "details": details,
         "case_no": case_no, "excluded": [subject_id],
     }, now)
+
+
+def open_action(author_id, action, title, details, now, about=None):
+    """Open a vote on a server change from actions.py, already checked.
+    `about` is the member it acts on, if any: they can't vote, the tally
+    stays hidden until it closes, and it needs `removal_percent` to pass."""
+    current = settings.current()
+    data = _load()
+    _check_limit(data, current, author_id)
+    proposal = _file(data, current, author_id, {
+        "kind": ACTION, "title": title, "details": details, "action": action,
+    }, now)
+    if about is not None:
+        proposal.update(excluded=[about], blind=True,
+                        pass_percent=current["removal_percent"])
+        _save(data)
+    return proposal
 
 
 def open_proposal(author_id, title, details, now, setting=None, value=None):

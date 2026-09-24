@@ -39,7 +39,7 @@ class WithTempData(unittest.TestCase):
 class Settings(WithTempData):
     def test_defaults_match_the_server_description(self):
         self.assertEqual(settings.current(), {
-            "voting_hours": 24, "quorum": 5, "pass_percent": 50,
+            "voting_hours": 24, "quorum": 5, "pass_percent": 50, "removal_percent": 66,
             "voter_min_days": 7, "max_open_per_member": 3,
             "warning_days": 30, "warnings_before_timeout": 3,
             "first_timeout_minutes": 60, "repeat_timeout_hours": 24,

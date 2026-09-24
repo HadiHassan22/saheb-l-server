@@ -51,11 +51,14 @@ def card(p):
     embed.add_field(name="Proposed by", value=f"<@{p['author_id']}>")
     if p["status"] == proposals.OPEN:
         embed.add_field(name="Closes", value=f"<t:{int(p['closes_at'])}:R>")
+        # A vote about a person shows turnout only, so nobody votes with the
+        # crowd against someone.
+        counted = (f"{yes + no} voted so far; the count is hidden until it closes"
+                   if p.get("blind") else f"{yes} {say['yes']} · {no} {say['no']}")
         embed.add_field(
             name="Votes",
-            value=(f"{yes} {say['yes']} · {no} {say['no']}\nNeeds at least "
-                   f"{p['quorum']} votes, and more than {p['pass_percent']}% "
-                   f"{say['yes']}"),
+            value=(f"{counted}\nNeeds at least {p['quorum']} votes, and more than "
+                   f"{p['pass_percent']}% {say['yes']}"),
             inline=False,
         )
     else:
@@ -207,6 +210,8 @@ def announcement(p):
         return f"Proposal {p['no']} failed ({counts})."
     if p.get("note"):
         return f"Proposal {p['no']} passed ({counts}). {p['note']}"
+    if p["kind"] == proposals.ACTION:
+        return f"Proposal {p['no']} passed ({counts}). The bot is making the change now."
     if p["kind"] == proposals.SETTING:
         return (f"Proposal {p['no']} passed ({counts}). "
                 f"{settings.SETTINGS[p['setting']]['label']} is now "
@@ -237,6 +242,19 @@ async def close_due(client):
                 await hook(client, p)
             except Exception as e:
                 log.error(f"{hook.__name__} failed for proposal {p['no']}: {e!r}")
+
+
+async def reply_to(client, p, text):
+    """Say something under proposal `p`'s card, or in its channel if the
+    card is gone."""
+    channel = client.get_channel((p or {}).get("channel_id") or 0)
+    if channel is None:
+        return
+    try:
+        message = await channel.fetch_message(p["message_id"])
+        await message.reply(text, mention_author=False)
+    except discord.HTTPException:
+        await channel.send(text)
 
 
 async def post_result(client, p):

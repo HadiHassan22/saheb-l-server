@@ -14,6 +14,7 @@ in the repository's history.
 | `PROTECTED.md` | This list. |
 | `ai.py`, `store.py` | Where the AI key is kept and how it is used, and how private files are written. |
 | `health.py` | The health check. Rollback relies on it to tell whether a new version came up. |
+| `guard.py` | Takes moderation-level permissions off every role and channel override, so no member ever holds power over another. |
 | `railway.json`, `railpack.json` | How the bot is deployed and health-checked. |
 
 ## Values that can't be changed
@@ -33,7 +34,18 @@ them with the version currently running.
   - the self-harm support message keeps Embrace's lifeline (1564), and the
     score that triggers it can't be raised (`judge.SUPPORT_AT`).
 
+- **What happens without a vote.** The things the bot does the moment
+  it's asked (the personal and light tiers in `assistant.py`) can't grow:
+  no tool can be added to them or moved into them. Tools can be removed
+  from them, or added as drafts that need a vote.
+- **The channels the bot depends on** (`actions.CORE`) stay protected
+  from being renamed or deleted by vote.
+- **The rules.** Rules 4 to 6 stay fixed (`conduct.FIXED`), and their
+  original text can't change.
+
 ## What no change may do
+
+- Give any role or member power over others: roles here are cosmetic.
 
 - Read, print, store or send any key or token: the Discord token, the AI
   key, or any other secret. New code may not read environment variables

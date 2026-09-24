@@ -2,7 +2,8 @@
 
 - The first check is TypeSafe's Jev, on OpenRouter's Decisions API. It is
   pinned to one version because the review threshold was tuned on it.
-- The full review is Claude Haiku, through providers.OpenRouter.
+- The full review is Claude Haiku, through providers.OpenRouter, which also
+  answers members in #ask-saheb.
 
 The server owner sets the key and a monthly budget with /ai-key; paying for
 the AI is part of keeping the bot online. The key is stored in a file only
@@ -101,6 +102,17 @@ async def review(prompt, schema):
     price_in, price_out = providers.prices("openrouter", REVIEWER)
     _spend((tokens_in * price_in + tokens_out * price_out) / 1_000_000, now)
     return answer
+
+
+async def converse(system, turns, tools, max_tokens=600):
+    """One turn of conversation with tools, through REVIEWER."""
+    now = time.time()
+    _ready(now)
+    reply = await providers.OpenRouter(key()).converse(
+        REVIEWER, system, turns, tools=tools, max_tokens=max_tokens)
+    price_in, price_out = providers.prices("openrouter", REVIEWER)
+    _spend((reply.tokens_in * price_in + reply.tokens_out * price_out) / 1_000_000, now)
+    return reply
 
 
 async def check_key(candidate):

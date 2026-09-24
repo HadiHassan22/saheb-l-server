@@ -5,9 +5,10 @@ experiment: if an AI holds all the power and every member holds one equal
 vote over what it does, does the server become fairer than one run by human
 moderators?
 
-> **Status: phase 4.** The bot builds its own server, runs votes,
-> moderates, puts appeals to a vote, and rewrites itself when a proposal
-> passes. See [Roadmap](#roadmap).
+> **Status:** the bot builds its own server, talks with members in
+> `#ask-saheb`, runs votes, moderates, puts appeals to a vote, and carries
+> out what passes: server changes directly, anything else by rewriting its
+> own code. See [Roadmap](#roadmap).
 
 ## How the server works
 
@@ -30,6 +31,13 @@ delete the message, time the member out, or ban them for severe or
 repeated violations. Every action is posted in `#mod-log` with the
 reasoning.
 
+**Talk to the bot.** Ask Saheb l Server anything in `#ask-saheb`, in
+English, Arabic or Arabizi. It changes your name color when you ask (or
+pick one in `#roles`), answers questions about the server, and drafts
+proposals for anything that affects everyone. It never files a proposal
+until you press the button, and it can't change anything for everyone
+without a vote.
+
 **Appeals.** Think the bot got it wrong? Use `/appeal` with the case
 number, or the Appeal button in its message to you. The community votes,
 and can overturn any action.
@@ -41,8 +49,9 @@ one of the bot's settings with `/propose-setting`.
 - A proposal needs at least 5 votes to count, and more than 50% yes to pass.
 - Members who have been here for 7 days can vote.
 
-**The bot rewrites itself.** When a proposal passes, the bot writes the
-code change, checks it automatically, and deploys it. Every change is
+**Votes are carried out automatically.** A passed change to the server,
+like a new channel, is made by the bot at once. Anything else is written
+as a code change, checked automatically and deployed. Every code change is
 public on GitHub.
 
 **What votes can't change.** The bot's access keys, the system that
@@ -64,6 +73,7 @@ version and keep going.
 | 2 | The bot builds its own server, and moderates what AutoMod flags, with every action in `#mod-log`. **Done.** |
 | 3 | Appeals: `/appeal` or the Appeal button opens a public vote that can overturn any action. **Done.** |
 | 4 | Self-rewriting: a passed proposal is written as code, checked, merged and deployed, and rolled back if the new version doesn't come up. **Done.** |
+| 5 | A full community layout, name colors, and `#ask-saheb`: members talk to the bot, which acts on its own for them and drafts proposals for everyone else. **Done.** |
 
 ## The server it builds
 
@@ -72,16 +82,108 @@ this, adopting Discord's default `#general` and General voice channel:
 
 | Category | Channels |
 | --- | --- |
-| Start here | `#welcome`, `#rules`, `#mod-log`: read-only, posted by the bot |
-| Governance | `#proposals`: the bot posts, members discuss in each proposal's thread |
-| Community | `#general`, `#off-topic`, General (voice) |
+| Start here | `#welcome`, `#rules`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
+| Governance | `#ask-saheb` (talk to the bot), `#proposals` (the bot posts; members discuss in each proposal's thread) |
+| Hangout | `#general`, `#introductions`, `#memes`, `#media`, `#off-topic` |
+| Lebanon | `#lebanon-news`, `#politics-and-religion` (30-second slowmode), `#diaspora` |
+| Interests | `#food`, `#pets`, `#gaming`, `#music`, `#sports`, `#movies-and-tv`, `#tech`, `#cars`, `#study-and-work` |
+| Voice | General, Ahwe, Lounge, Gaming 1, Gaming 2, Study Room, AFK |
 | Bot | `#automod-alerts`: hidden, AutoMod's alerts to the moderator |
 
 It also sets the server's verification level to medium, scans media from
-all members for explicit content, and sets notifications to mentions only.
+all members for explicit content, sets notifications to mentions only, and
+moves members idle for 15 minutes to AFK. It creates the 14 name-color
+roles and puts the color picker in `#roles`.
+
+The layout is in `layout.py`. Once the server is running, channels change
+by vote (see below): a channel deleted by vote stays deleted.
 On every start it recreates anything missing and brings its AutoMod rules
 and the `#welcome` and `#rules` posts up to date. It runs one server: the
 first one it's invited to becomes its home, and it leaves any other.
+
+## Talking to the bot
+
+In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
+answers in the language they use. It is the only channel where the bot
+reads ordinary messages. The model understands the request, and code
+decides what is allowed: every tool is in one of four tiers, fixed in
+`assistant.py`.
+
+| Tier | Rule | What |
+| --- | --- | --- |
+| Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases |
+| Personal | Only the member asking, who can undo it: done at once | name color; join or leave a role; nickname; an invite link (up to 10 uses, 24 hours, 5 a day) |
+| Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread; pin or unpin a message |
+| Draft | Changes the server for everyone, or acts on a member: a vote | see below |
+
+What a vote can order, carried out by code when it passes (`actions.py`):
+
+| Area | Changes |
+| --- | --- |
+| Channels and categories | create, rename, delete; a channel's topic and slowmode |
+| Roles | create (with a color, and whether members can join it), rename, recolor, delete: always cosmetic |
+| Emojis | add (from an image attached in `#ask-saheb`), remove |
+| The server | rename it; set its icon |
+| Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
+| AutoMod | add or remove watch words; blocked words stay |
+| Events | cancel someone else's event |
+| Members | kick, ban, unban |
+| Settings | any of the settings, within its range |
+| Anything else | a general proposal, written as code by the self-update workflow |
+
+- **Drafts are filed by the member, not the bot.** The reply carries a
+  **File it** button that only the member who asked can press, once.
+- **Votes about a member** (kick, ban) need the member @mentioned and a
+  reason, hide their count until they close, need `removal_percent`
+  (66% to start, never below 60%) to pass, and the member can't vote on
+  them. The member is told why by DM. Immediate danger stays with the
+  moderator.
+- **Nobody holds power over anyone.** Roles are created with no
+  permissions, and `guard.py` takes moderation-level permissions off every
+  role and channel override whenever one changes, and every hour, however
+  they got there, and says so in `#server-log`. That includes pinging
+  `@everyone`, which only the bot can do.
+- **What it can't do, whatever anyone says:** give anyone power, act on
+  another member without a vote, change a moderation decision, or skip a
+  vote. There is no tool for any of it, and claiming to be the owner
+  changes nothing. The channels the bot depends on can't be renamed or
+  deleted, even by vote. A code change can't add anything to the personal
+  or light tiers: only the owner can, by committing directly.
+- **Costs.** Claude Haiku on the owner's OpenRouter key and monthly
+  budget, about a fifth of a cent per answer. Each member can ask 8 times
+  in 10 minutes, and it remembers their last few exchanges for half an
+  hour.
+
+## What still needs a human
+
+Almost everything runs without one. What can't:
+
+- **Owning the server.** Discord requires a human owner and never lets a
+  bot hold ownership. The owner keeps powers no bot can take away, so the
+  owner's account is a matter of trust and security (turn on 2FA).
+  Deleting the server and transferring it are owner-only.
+- **Paying.** Railway, OpenRouter, Anthropic, and any server boosts.
+  Boost-only features (a vanity invite link, a banner, larger uploads)
+  need members to boost.
+- **Keys.** The Discord token, the API keys and the GitHub secret, set
+  once, and replaced if one ever leaks. The Discord developer portal
+  settings.
+- **The law and Discord.** The bot deletes illegal content and bans
+  whoever posted it, but reporting it to Discord or the authorities, and
+  answering Discord's own warnings, is a person's job.
+- **Recovery.** If the bot is down or broken past the automatic rollback,
+  banned by Discord, or has lost its data, only the owner can step in.
+- **The protected core** ([PROTECTED.md](PROTECTED.md)), by design.
+- **What Discord hides from bots:** what is said in voice, direct
+  messages between members, members' real ages or identities, and applying
+  for Server Discovery or Partner status.
+
+## Name colors
+
+Members pick one of 14 colors in `#roles` or with `/color`, or ask for one
+in `#ask-saheb`. A color only changes how a name looks: the roles carry no
+permissions, sit at the bottom of the role list, and a member holds one at
+a time. The list is in `colors.py`, so changing it is a proposal.
 
 ## Voting
 
@@ -162,7 +264,8 @@ Known limits:
   Server, which includes the owner. The bot can't change that.
 - The bot can only act on members whose highest role is below its own.
 - Anything AutoMod doesn't flag is never seen. The watch lists are in
-  `automod.py`.
+  `automod.py`. That includes `#ask-saheb`: the bot reads messages there
+  to answer them, not to moderate them.
 
 To check how the first check scores a set of example messages with the
 current dials, run `calibrate.py` (see [Running it](#running-it)).
@@ -231,6 +334,12 @@ Each proposal is attempted once. To try again, propose it again.
 | File | What it does |
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
+| `chat.py` | `#ask-saheb`: rate limits, memory, and the File it button |
+| `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
+| `actions.py` | Everything a vote can order, checked and carried out by code |
+| `quick.py` | What's done at once when asked: personal and light actions, with their limits |
+| `guard.py` | Keeps every role cosmetic (protected) |
+| `colors.py` | The name colors, the `#roles` picker and `/color` |
 | `health.py` | `/healthz` and `/api/passed`, which the update system relies on (protected) |
 | `updates.py` | Follows passed proposals through GitHub and reports in `#proposals` |
 | `PROTECTED.md` | What votes can't change (protected) |

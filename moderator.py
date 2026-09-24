@@ -154,7 +154,7 @@ async def _apply(guild, member, channel, message_id, sanction, case):
     """Carry out the sanction. Returns None, or what could not be done."""
     if member.id == guild.owner_id or member.top_role >= guild.me.top_role:
         return "the bot's role is not above this member's, so nothing was applied"
-    title = conduct.RULES[case["rule"] - 1][0]
+    title = conduct.title(case["rule"])
     try:
         await member.send(
             f"**{cases.label(case)}** in {guild.name}, case {case['no']}.\n"
@@ -184,7 +184,7 @@ async def _post(guild, member, case, screening):
     log_channel = layout.channel(guild, "mod-log")
     if log_channel is None:
         return
-    title = conduct.RULES[case["rule"] - 1][0]
+    title = conduct.title(case["rule"])
     embed = discord.Embed(
         title=f"Case {case['no']} · {cases.label(case)}"
               + (" · message deleted" if case["deleted"] else ""),

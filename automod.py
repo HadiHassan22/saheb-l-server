@@ -19,6 +19,8 @@ import logging
 
 import discord
 
+import store
+
 log = logging.getLogger("automod")
 
 PREFIX = "Saheb l Server: "
@@ -84,15 +86,32 @@ BLOCK_MESSAGE = ("Blocked: this looked like a scam or someone's phone "
                  "number. It has been passed to the moderator.")
 
 
+def community_words():
+    """Watch words changed by vote: {"added": [...], "removed": [...]}. Only
+    the watch lists change this way; what is blocked is the safety floor."""
+    return store.load("watch_words", {"added": [], "removed": []})
+
+
+def save_community_words(words):
+    store.save("watch_words", words)
+
+
 def plan():
     """(name, trigger, block) for every rule the bot keeps. Names are how
     the bot recognises its own rules again on the next start."""
     T = discord.AutoModRuleTriggerType
-    return [
-        (PREFIX + "watch English",
-         discord.AutoModTrigger(type=T.keyword, keyword_filter=ENGLISH), False),
-        (PREFIX + "watch Arabic",
-         discord.AutoModTrigger(type=T.keyword, keyword_filter=ARABIC), False),
+    words = community_words()
+    removed = set(words["removed"])
+    rules = [
+        (PREFIX + "watch English", discord.AutoModTrigger(
+            type=T.keyword, keyword_filter=[w for w in ENGLISH if w not in removed]), False),
+        (PREFIX + "watch Arabic", discord.AutoModTrigger(
+            type=T.keyword, keyword_filter=[w for w in ARABIC if w not in removed]), False),
+    ]
+    if words["added"]:
+        rules.append((PREFIX + "watch words added by vote", discord.AutoModTrigger(
+            type=T.keyword, keyword_filter=words["added"][:1000]), False))
+    return rules + [
         (PREFIX + "watch Arabizi",
          discord.AutoModTrigger(type=T.keyword, regex_patterns=ARABIZI), False),
         (PREFIX + "block scams and phone numbers",
@@ -123,7 +142,12 @@ async def install(guild, alert_channel):
     """Create the bot's rules, or bring existing ones back in line with the
     plan. Rules someone else made are left alone."""
     existing = {r.name: r for r in await guild.fetch_automod_rules()}
-    for name, trigger, block in plan():
+    planned = plan()
+    wanted = {name for name, _, _ in planned}
+    for name, rule in existing.items():
+        if name.startswith(PREFIX) and name not in wanted:
+            await rule.delete(reason="No longer part of the bot's AutoMod rules")
+    for name, trigger, block in planned:
         kwargs = dict(
             trigger=trigger,
             actions=_actions(alert_channel, block),

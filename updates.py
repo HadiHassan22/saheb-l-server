@@ -27,6 +27,7 @@ from discord.ext import tasks
 import health
 import proposals
 import store
+import voting_ui
 
 log = logging.getLogger("updates")
 
@@ -100,15 +101,7 @@ def running_proposal():
 
 
 async def _say(client, no, text):
-    p = proposals.get(no)
-    channel = client.get_channel((p or {}).get("channel_id") or 0)
-    if channel is None:
-        return
-    try:
-        message = await channel.fetch_message(p["message_id"])
-        await message.reply(text, mention_author=False)
-    except Exception:
-        await channel.send(text)
+    await voting_ui.reply_to(client, proposals.get(no), text)
 
 
 async def _pull_requests():

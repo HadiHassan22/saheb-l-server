@@ -26,6 +26,11 @@ SETTINGS = {
         "label": "Yes votes needed to pass",
         "describe": "more than {}% of votes cast",
     },
+    "removal_percent": {
+        "default": 66, "min": 60, "max": 90, "group": VOTING,
+        "label": "Yes votes needed to kick or ban someone",
+        "describe": "more than {}% of votes cast",
+    },
     "voter_min_days": {
         "default": 7, "min": 0, "max": 90, "group": VOTING,
         "label": "Time in the server before you can vote",

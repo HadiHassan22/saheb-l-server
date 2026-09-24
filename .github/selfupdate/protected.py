@@ -13,13 +13,18 @@ import subprocess
 import sys
 
 PROTECTED_PATHS = (".github/", "PROTECTED.md", "ai.py", "store.py", "health.py",
-                   "railway.json", "railpack.json")
+                   "guard.py", "railway.json", "railpack.json")
 
 # Read out of each tree by importing it, so the values compared are the
 # ones the bot would actually run with.
 SNAPSHOT = r"""
-import json, automod, judge, moderator, settings
+import json, actions, assistant, automod, conduct, judge, moderator, settings
 print(json.dumps({
+    "instant_tools": sorted(n for n, t in assistant.TIER.items()
+                            if t in (assistant.SELF, assistant.LIGHT)),
+    "core_channels": sorted(actions.CORE),
+    "fixed_rules": sorted(conduct.FIXED),
+    "floor_rule_text": [list(r) for r in conduct.DEFAULT_RULES[3:6]],
     "ranges": {k: [v["min"], v["max"]] for k, v in settings.SETTINGS.items()},
     "block_words": automod.BLOCK_WORDS,
     "block_patterns": automod.BLOCK_PATTERNS,
@@ -75,6 +80,17 @@ def value_problems(base, head):
         problems.append("raises the score that triggers the self-harm support message")
     if "1564" not in head["support_line"]:
         problems.append("removes Embrace's lifeline from the support message")
+    for tool in head["instant_tools"]:
+        if tool not in base["instant_tools"]:
+            problems.append(f"lets the bot do {tool} without a vote")
+    for name in base["core_channels"]:
+        if name not in head["core_channels"]:
+            problems.append(f"lets a vote rename or delete #{name}")
+    for rule in base["fixed_rules"]:
+        if rule not in head["fixed_rules"]:
+            problems.append(f"lets a vote change rule {rule}")
+    if head["floor_rule_text"] != base["floor_rule_text"]:
+        problems.append("changes the text of rules 4 to 6")
     return problems
 
 

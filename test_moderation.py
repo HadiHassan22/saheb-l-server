@@ -93,7 +93,7 @@ class FirstCheck(unittest.TestCase):
 class Review(unittest.TestCase):
     def test_prompt_carries_every_rule_and_the_conversation(self):
         prompt = judge.review_prompt("STATE")
-        for title, _ in conduct.RULES:
+        for title, _ in conduct.rules():
             self.assertIn(title, prompt)
         self.assertIn("STATE", prompt)
 
@@ -208,11 +208,14 @@ class AutoModLists(unittest.TestCase):
 
 
 class Texts(unittest.TestCase):
-    def test_posts_fit_in_one_discord_message(self):
-        self.assertLessEqual(len(conduct.rules_text()), 2000)
-        welcome = conduct.welcome_text("<@1234567890123456789>", "<#1234567890123456789>")
-        self.assertLessEqual(len(welcome), 2000)
+    def test_posts_fit_in_one_embed(self):
+        title, rules = conduct.rules_text()
+        self.assertLessEqual(len(rules), 4096)
+        title, welcome = conduct.welcome_text("<@1234567890123456789>",
+                                              "<#1234567890123456789>", "<#1>")
+        self.assertLessEqual(len(welcome), 4096)
         self.assertIn("24 hours", welcome)
+        self.assertIn("<#1>", welcome)
 
 
 if __name__ == "__main__":

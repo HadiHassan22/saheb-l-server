@@ -40,7 +40,7 @@ UNDO = {
 
 def appeal_text(case, reason):
     """(title, details) of the appeal proposal for `case`."""
-    rule_title = conduct.RULES[case["rule"] - 1][0]
+    rule_title = conduct.title(case["rule"])
     if case["rule"] in judge.HIDDEN_RULES or not case.get("excerpt"):
         quoted = "(not repeated here)"
     else:

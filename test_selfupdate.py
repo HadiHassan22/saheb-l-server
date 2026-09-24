@@ -30,12 +30,13 @@ NOW = 1_800_000_000
 class ProtectedPaths(unittest.TestCase):
     def test_protected_files_and_the_workflow_folder_are_refused(self):
         changed = ["judge.py", ".github/workflows/self-update.yml", "ai.py",
-                   "PROTECTED.md", "health.py", "README.md"]
+                   "PROTECTED.md", "health.py", "README.md", "guard.py"]
         self.assertEqual(protected.path_problems(changed), [
             "changes a protected file: .github/workflows/self-update.yml",
             "changes a protected file: ai.py",
             "changes a protected file: PROTECTED.md",
             "changes a protected file: health.py",
+            "changes a protected file: guard.py",
         ])
 
     def test_similar_names_are_not_protected(self):
@@ -87,6 +88,22 @@ class ProtectedValues(unittest.TestCase):
             h["support_line"] = "Take care."
         found = self.changed(weaken)
         self.assertEqual(len(found), 6, found)
+
+    def test_nothing_new_happens_without_a_vote_and_the_core_stays(self):
+        def loosen(h):
+            h["instant_tools"].append("ban_member_now")
+            h["core_channels"].remove("mod-log")
+            h["fixed_rules"].remove(5)
+            h["floor_rule_text"][0][1] = "Doxxing is fine."
+        found = self.changed(loosen)
+        self.assertEqual(found, [
+            "lets the bot do ban_member_now without a vote",
+            "lets a vote rename or delete #mod-log",
+            "lets a vote change rule 5",
+            "changes the text of rules 4 to 6",
+        ])
+        tightened = self.changed(lambda h: h["instant_tools"].remove("pin_message"))
+        self.assertEqual(tightened, [])
 
 
 class Scans(unittest.TestCase):
