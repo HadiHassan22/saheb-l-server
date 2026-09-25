@@ -410,21 +410,26 @@ passed proposal is still waiting and no run is going; GitHub also starts
 it every ten minutes, when it gets round to it. Each run takes the oldest
 passed proposal that hasn't been handled:
 
-1. **Claude Code writes the change** (Sonnet 5) on a branch named
-   `proposal-N`. It can read and edit files and nothing else: no shell,
-   no GitHub credentials. If the proposal needs no code, or can't be done
+1. **Claude Code writes the change** on a branch named `proposal-N`,
+   with a model from OpenRouter (MiMo V2.6 Pro unless the `CODER_MODEL`
+   variable names another). It can read and edit files and nothing else:
+   no shell, no GitHub credentials. If Claude Code can't run, for example
+   because the OpenRouter credit ran out, the try is recorded as failed,
+   not as a change that needed no code. If the proposal needs no code, or can't be done
    within the protected core, it changes nothing and says why.
 2. **The tests run**, with no secrets available. If they fail, Claude
    gets one chance to fix its change.
 3. **The protected-core check** refuses any change to the files and
    values listed in [PROTECTED.md](PROTECTED.md), and any added line that
    reads environment variables or keys or runs code built at runtime.
-4. **A security review** by Opus 5.5 reads the whole diff against the
-   proposal and rejects anything that could leak a secret, contact a new
+4. **A security review**, for a change members voted for, reads the
+   whole diff against the proposal (Claude Haiku 4.5 through OpenRouter,
+   unless the `REVIEWER_MODEL` variable names another) and rejects anything that could leak a secret, contact a new
    host, add a suspicious dependency, work around the protected core,
    break Discord's rules, or do something materially different from what
-   was voted for. If this check or the protected-core check refuses the
-   change, Claude is told why and gets one more try, with the tests and
+   was voted for. An admin's change skips it: admins can already do
+   anything a vote can. If this check or the protected-core check refuses
+   the change, Claude is told why and gets one more try, with the tests and
    every check run again.
 5. **The result is recorded as a pull request**, whatever happens:
    merged, or closed as `failed` or `no-change` with the reasons. A change
@@ -536,10 +541,12 @@ To turn on self-updating, in the GitHub repository's settings:
 
 - **Variable `BOT_URL`:** the Railway address, for example
   `https://saheb-l-server.up.railway.app`.
-- **Secret `ANTHROPIC_API_KEY`:** a key from the
-  [Anthropic Console](https://console.anthropic.com), ideally with a
-  monthly spend limit. Each proposal costs roughly a dollar or two to
-  write and review.
+- **Secret `OPENROUTER_API_KEY`:** an OpenRouter key for the workflow,
+  ideally its own with a credit limit, and with zero data retention on
+  in OpenRouter's privacy settings (Claude Code's requests can't ask for
+  it themselves). Each proposal costs a few cents to write and review.
+- **Variables `CODER_MODEL` and `REVIEWER_MODEL`** (optional): any
+  OpenRouter model id, to change which model writes or reviews.
 - **Actions, then General:** allow GitHub Actions to create pull requests.
 - **The repository must stay public:** the bot reads pull requests through
   GitHub's public API when its token can't.

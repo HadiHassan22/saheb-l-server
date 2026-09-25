@@ -65,7 +65,7 @@ first server it joins as home (leaving any other), calls each module's
 - **Self-update:** `.github/workflows/self-update.yml` runs
   `.github/selfupdate/run.py`, which has Claude Code write a passed
   proposal's change, runs the tests without secrets, checks the protected
-  core (`protected.py`), has it reviewed, merges, and rolls back if
+  core (`protected.py`), has a voted change reviewed, merges, and rolls back if
   `/healthz` (`health.py`) doesn't show the new commit. The bot starts
   it when a proposal passes (`workflow.py`, the owner's `/github-key`
   token); GitHub's timer is the backup. `updates.py` reports progress

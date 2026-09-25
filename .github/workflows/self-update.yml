@@ -4,7 +4,10 @@
 #
 # Needs, set once by the repository owner:
 #   - repository variable BOT_URL: the bot's public Railway address
-#   - repository secret ANTHROPIC_API_KEY
+#   - repository secret OPENROUTER_API_KEY
+# And, to change the models (any OpenRouter model id):
+#   - repository variable CODER_MODEL (default xiaomi/mimo-v2.6-pro)
+#   - repository variable REVIEWER_MODEL (default anthropic/claude-haiku-4.5)
 name: Self-update
 
 on:
@@ -45,6 +48,6 @@ jobs:
         env:
           BOT_URL: ${{ vars.BOT_URL }}
           GH_TOKEN: ${{ github.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CODER_MODEL: claude-sonnet-5
-          REVIEWER_MODEL: claude-opus-5-5
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CODER_MODEL: ${{ vars.CODER_MODEL }}
+          REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL }}

@@ -5,12 +5,17 @@ back if it doesn't.
 
 Run by .github/workflows/self-update.yml, with:
   BOT_URL            the bot's public address (a repository variable)
-  GH_TOKEN           the workflow's own token
-  ANTHROPIC_API_KEY  for writing and reviewing the change
-  GITHUB_REPOSITORY  set by GitHub
+  GH_TOKEN            the workflow's own token
+  OPENROUTER_API_KEY  for writing and reviewing the change
+  CODER_MODEL         the OpenRouter model Claude Code writes with
+  REVIEWER_MODEL      the OpenRouter model that reviews a voted change
+  GITHUB_REPOSITORY   set by GitHub
 
-The secrets are kept apart. Claude Code gets the Anthropic key and no
-shell, so it can read and edit files but run nothing. It also reads a
+The secrets are kept apart. Claude Code gets the OpenRouter key and no
+shell, so it can read and edit files but run nothing. It is the harness
+only: OpenRouter's Anthropic-compatible endpoint runs whichever model
+CODER_MODEL names, so the model can be changed, and priced, without
+touching this script. It also reads a
 copy of discord.py, so it checks the library's signatures instead of
 guessing them; a copy, so nothing it edits there reaches the library the
 tests run against. The tests and the protected-core check run with no
@@ -125,18 +130,48 @@ def copy_discord():
         shutil.copytree(installed, DISCORD, ignore=shutil.ignore_patterns("__pycache__"))
 
 
+class WriterFailed(Exception):
+    """Claude Code stopped without doing its work, for example because the
+    Anthropic account is out of credit. The try is recorded as failed, not
+    as a change that needed no code, so an admin knows to retry it."""
+
+
+# What Claude Code prints, instead of an answer, when it couldn't run.
+WRITER_ERRORS = ("Credit balance is too low", "API Error", "Invalid API key",
+                 "Error:", "Execution error")
+
+
+OPENROUTER = "https://openrouter.ai/api"
+CODER = "xiaomi/mimo-v2.6-pro"  # when the CODER_MODEL variable isn't set
+
+
 def claude(prompt):
-    """Claude Code, with the Anthropic key and no shell."""
-    env = dict(CLEAN, ANTHROPIC_API_KEY=os.environ["ANTHROPIC_API_KEY"])
+    """Claude Code, writing with CODER_MODEL through OpenRouter, with no
+    shell. Raises WriterFailed if it exits with an error or answers with
+    one."""
+    model = os.environ.get("CODER_MODEL") or CODER
+    # ANTHROPIC_API_KEY is set empty: if it held a key it would win over
+    # the OpenRouter token. Every model Claude Code might pick for a side
+    # task (titles, subagents) is the same one, so nothing reaches Claude.
+    env = dict(CLEAN, ANTHROPIC_BASE_URL=OPENROUTER, ANTHROPIC_API_KEY="",
+               ANTHROPIC_AUTH_TOKEN=os.environ["OPENROUTER_API_KEY"],
+               ANTHROPIC_DEFAULT_OPUS_MODEL=model, ANTHROPIC_DEFAULT_SONNET_MODEL=model,
+               ANTHROPIC_DEFAULT_HAIKU_MODEL=model, CLAUDE_CODE_SUBAGENT_MODEL=model,
+               CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
     # --tools makes these the only tools that exist, so there is no shell to
     # talk into running anything; --allowedTools approves them without asking.
     tools = "Read,Edit,Write,Glob,Grep"
     result = subprocess.run(
-        ["claude", "-p", prompt, "--model", os.environ.get("CODER_MODEL", "claude-sonnet-5"),
+        ["claude", "-p", prompt, "--model", model,
          "--tools", tools, "--allowedTools", tools, "--permission-mode", "acceptEdits",
          "--add-dir", str(DISCORD)],
         cwd=ROOT, env=env, capture_output=True, text=True, timeout=45 * 60)
     print(result.stdout[-5000:])
+    said = (result.stdout.strip() or result.stderr.strip())
+    if result.returncode != 0 or said.startswith(WRITER_ERRORS):
+        print(result.stderr[-2000:])
+        raise WriterFailed(said.splitlines()[-1][:300] if said
+                           else f"it exited with code {result.returncode}")
 
 
 def approval(p):
@@ -153,7 +188,7 @@ def implement_prompt(p):
 - Make the smallest change that does what the proposal says, in the style of the code around it. Add or update tests (test_*.py) and the README where behaviour changes.
 - Don't guess discord.py's API. The version the bot runs is copied at {DISCORD}: before you use a discord.py class, method or argument you haven't seen used in this repository, find it there (Grep for `class Name` or `def name`) and follow its real signature.
 - In tests, fake the discord.py objects your change calls with a spec, for example `mock.create_autospec(discord.Guild, instance=True)` or `mock.Mock(spec=discord.Onboarding)`, not a bare Mock, AsyncMock or SimpleNamespace, so calling a method or argument discord.py doesn't have fails the test.
-- You can't run commands. The tests, the protected-core check and a security review run after you finish; if any of them fails, you'll be told why and get one chance to fix it.
+- You can't run commands. The tests, the protected-core check and, for a change members voted for, a security review run after you finish; if any of them fails, you'll be told why and get one chance to fix it.
 - If the proposal needs no code change (for example, it is a decision about something outside the bot), or can't be done without touching the protected core or breaking Discord's Terms of Service, change no files.
 - When you're done, write .selfupdate-summary.md: two to five plain sentences for the server's members saying what you changed and why, or why you changed nothing. No code, and no links.
 
@@ -287,7 +322,9 @@ def attempt(p, branch):
             return "no-change", summary or "No files needed changing."
         problems = [] if passed else ["The tests fail:\n```\n" + output[-3000:] + "\n```"]
         problems += protected.check(str(base), admin=bool(p.get("shipped")))
-        if not problems:
+        # An admin's change isn't reviewed: admins can already do anything a
+        # vote can. A vote's change is, since any member can propose one.
+        if not problems and not p.get("shipped"):
             import review  # needs the bot's dependencies, which the workflow installs
             approved, found = asyncio.run(review.review(
                 f"Proposal {p['no']}: {p['title']}\n({approval(p)})\n\n{p['details']}", diff))
@@ -314,6 +351,12 @@ def main():
     run("git", "switch", "-c", branch)
     try:
         outcome, body = attempt(p, branch)
+    except WriterFailed as e:
+        run("git", "reset", "--hard", "origin/main")
+        outcome, body = "failed", (f"Claude Code couldn't write the change: {e}\n\n"
+                                   "Nothing was changed. An admin can try it again "
+                                   "with /admin retry.")
+        print(repr(e))
     except Exception as e:
         run("git", "reset", "--hard", "origin/main")
         outcome, body = "failed", f"The self-update run broke: {type(e).__name__}."

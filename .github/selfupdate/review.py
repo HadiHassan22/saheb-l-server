@@ -1,10 +1,12 @@
-"""The security review: a strong model reads the whole change and the
-proposal it claims to carry out, and must approve it before it merges.
+"""The security review: a model reads the whole change and the proposal
+it claims to carry out, and must approve it before it merges.
 
 It is the last check, after the tests and the protected-core check, and
 the one that catches what patterns can't: a change that leaks a key in a
 way no regex anticipated, does something other than what was voted for,
-or breaks Discord's rules.
+or breaks Discord's rules. Only changes members voted for are reviewed;
+an admin's change isn't (run.py). It goes through OpenRouter, like the
+bot's own AI, with zero data retention, using REVIEWER_MODEL.
 """
 
 import asyncio
@@ -63,11 +65,10 @@ async def review(proposal, diff):
     """(approved, problems)."""
     if len(diff) > MAX_DIFF:
         return False, [f"The change is too large to review ({len(diff)} characters)."]
-    client = providers.Claude(os.environ["ANTHROPIC_API_KEY"])
-    answer, _, _ = await client.json_answer(
-        os.environ.get("REVIEWER_MODEL", "claude-opus-5-5"), prompt(proposal, diff),
-        # Thinking shares max_tokens with the answer, hence the room.
-        SCHEMA, max_tokens=16000, effort="high")
+    client = providers.OpenRouter(os.environ["OPENROUTER_API_KEY"])
+    answer, _, _, _ = await client.json_answer(
+        os.environ.get("REVIEWER_MODEL") or "anthropic/claude-haiku-4.5",
+        prompt(proposal, diff), SCHEMA, max_tokens=4000)
     problems = [str(p) for p in answer.get("problems") or []]
     approved = bool(answer.get("approve")) and not problems
     if not answer:

@@ -6,9 +6,14 @@ workflow. No network.
 """
 
 import asyncio
+import contextlib
 import copy
 import importlib.util
+import io
+import os
 import shutil
+import subprocess
+import sys
 import tempfile
 import types
 import unittest
@@ -452,6 +457,103 @@ _spec = importlib.util.spec_from_file_location(
     "selfupdate_run", HERE / ".github" / "selfupdate" / "run.py")
 selfupdate_run = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(selfupdate_run)
+
+
+class Writer(unittest.TestCase):
+    """A Claude Code run that fails is a failed try, never "no change"."""
+
+    def written(self, returncode, stdout, stderr="", **env):
+        done = subprocess.CompletedProcess([], returncode, stdout, stderr)
+        with mock.patch.object(selfupdate_run.subprocess, "run", return_value=done) as ran, \
+                mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key", **env}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            selfupdate_run.claude("Do it.")
+        return ran.call_args
+
+    def test_it_writes_with_the_chosen_openrouter_model(self):
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-real"}):
+            call = self.written(0, "Done.", CODER_MODEL="z-ai/glm-5.3")
+        args, env = call.args[0], call.kwargs["env"]
+        self.assertEqual(args[args.index("--model") + 1], "z-ai/glm-5.3")
+        self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api")
+        self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "or-key")
+        self.assertEqual(env["ANTHROPIC_API_KEY"], "")  # else it would win
+        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "z-ai/glm-5.3")
+        self.assertNotIn("GH_TOKEN", env)
+        call = self.written(0, "Done.", CODER_MODEL="")
+        args = call.args[0]
+        self.assertEqual(args[args.index("--model") + 1], selfupdate_run.CODER)
+
+    def test_out_of_credit_is_a_failure(self):
+        with self.assertRaises(selfupdate_run.WriterFailed) as caught:
+            self.written(1, "Credit balance is too low\n")
+        self.assertEqual(str(caught.exception), "Credit balance is too low")
+        with self.assertRaises(selfupdate_run.WriterFailed):
+            self.written(0, "Credit balance is too low")
+        with self.assertRaises(selfupdate_run.WriterFailed) as caught:
+            self.written(2, "")
+        self.assertIn("code 2", str(caught.exception))
+
+    def test_an_answer_is_not_a_failure(self):
+        self.written(0, "I added the rank-up command and its tests.")
+        self.written(0, "The proposal is about an API Error message; I changed nothing.")
+
+    def test_it_is_recorded_as_failed_with_the_reason(self):
+        recorded = {}
+        with mock.patch.object(selfupdate_run, "next_proposal",
+                               return_value={"no": 27, "title": "Ranks"}), \
+                mock.patch.object(selfupdate_run, "run"), \
+                mock.patch.object(selfupdate_run, "attempt", side_effect=
+                                  selfupdate_run.WriterFailed("Credit balance is too low")), \
+                mock.patch.object(selfupdate_run, "record", side_effect=lambda p, b, o, body:
+                                  recorded.update(outcome=o, body=body)), \
+                contextlib.redirect_stdout(io.StringIO()):
+            selfupdate_run.main()
+        self.assertEqual(recorded["outcome"], "failed")
+        self.assertIn("Credit balance is too low", recorded["body"])
+        self.assertIn("/admin retry", recorded["body"])
+
+
+class Reviewing(unittest.TestCase):
+    """Only a change members voted for is reviewed."""
+
+    def attempt(self, shipped):
+        reviewed = mock.AsyncMock(return_value=(True, []))
+        with mock.patch.object(selfupdate_run, "run", return_value=mock.Mock(stdout="+x")), \
+                mock.patch.object(selfupdate_run, "copy_discord"), \
+                mock.patch.object(selfupdate_run, "claude"), \
+                mock.patch.object(selfupdate_run, "take_summary", return_value="Did it."), \
+                mock.patch.object(selfupdate_run, "changed", return_value=True), \
+                mock.patch.object(selfupdate_run, "tests", return_value=(True, "")), \
+                mock.patch.object(selfupdate_run.protected, "check", return_value=[]), \
+                mock.patch.object(selfupdate_run.protected, "contains_secret",
+                                  return_value=False), \
+                mock.patch.dict("sys.modules", {"review": types.SimpleNamespace(
+                    review=reviewed)}):
+            outcome = selfupdate_run.attempt({"no": 5, "title": "T", "details": "D",
+                                              "shipped": shipped}, "proposal-5")
+        return outcome, reviewed
+
+    def test_an_admins_change_skips_the_review_and_a_votes_does_not(self):
+        outcome, reviewed = self.attempt(shipped=True)
+        self.assertEqual(outcome, ("merged", "Did it."))
+        reviewed.assert_not_awaited()
+        outcome, reviewed = self.attempt(shipped=False)
+        self.assertEqual(outcome, ("merged", "Did it."))
+        reviewed.assert_awaited_once()
+
+    def test_the_review_goes_through_openrouter(self):
+        sys.path.insert(0, str(HERE / ".github" / "selfupdate"))
+        try:
+            import review
+        finally:
+            sys.path.pop(0)
+        answer = mock.AsyncMock(return_value=({"approve": True, "problems": []}, 1, 1, 0.01))
+        with mock.patch.object(review.providers.OpenRouter, "json_answer", answer), \
+                mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key",
+                                             "REVIEWER_MODEL": ""}):
+            self.assertEqual(asyncio.run(review.review("Proposal", "+x")), (True, []))
+        self.assertEqual(answer.call_args.args[0], "anthropic/claude-haiku-4.5")
 
 
 class Retry(WithTempData):
