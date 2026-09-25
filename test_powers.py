@@ -191,7 +191,7 @@ class Quick(WithTempData):
             await quick.pin(member, "pin the last message")
 
 
-class Guard(unittest.IsolatedAsyncioTestCase):
+class Guard(WithTempData):
     def test_powers_are_taken_and_everything_else_kept(self):
         kept = discord.Permissions(send_messages=True, connect=True, change_nickname=True)
         self.assertIsNone(guard.stripped(kept))
@@ -204,7 +204,6 @@ class Guard(unittest.IsolatedAsyncioTestCase):
                                          discord.Permissions(ban_members=True)))
 
     async def test_the_sweep_takes_powers_from_every_role_it_can_and_says_so(self):
-        guard._warned.clear()
         mods = role(10, "Mods", permissions=discord.Permissions(ban_members=True))
         fine = role(11, "Gamers", permissions=discord.Permissions(send_messages=True))
         above = role(12, "Owner's", position=60, permissions=discord.Permissions(administrator=True))
@@ -221,6 +220,25 @@ class Guard(unittest.IsolatedAsyncioTestCase):
         above.edit.assert_not_awaited()
         self.assertEqual(sum("only the server owner" in s for s in said), 1)
         self.assertTrue(any("ban_members" in s and "Mods" in s for s in said))
+
+    async def test_a_role_it_cant_fix_is_reported_once_across_restarts(self):
+        above = role(12, "Admin", position=60,
+                     permissions=discord.Permissions(ban_members=True))
+        g = guild([above])
+        said = []
+
+        async def report(text):
+            said.append(text)
+        await guard.sweep(g, report)
+        await guard.sweep(g, report)  # as after a redeploy: only the saved state is kept
+        self.assertEqual(len(said), 1)
+        above.permissions = discord.Permissions(ban_members=True, kick_members=True)
+        await guard.sweep(g, report)  # its powers changed: worth saying again
+        above.permissions = discord.Permissions.none()
+        await guard.sweep(g, report)  # fixed by the owner
+        above.permissions = discord.Permissions(ban_members=True)
+        await guard.sweep(g, report)  # and broken again
+        self.assertEqual(len(said), 3)
 
 
 if __name__ == "__main__":

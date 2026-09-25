@@ -20,6 +20,8 @@ import logging
 import discord
 from discord.ext import tasks
 
+import store
+
 log = logging.getLogger("guard")
 
 POWERS = discord.Permissions(
@@ -31,7 +33,25 @@ POWERS = discord.Permissions(
     view_guild_insights=True, create_expressions=True, create_events=True,
 )
 NAMES = [name for name, on in POWERS if on]
-_warned = set()
+
+
+def _first_warning(role):
+    """True if the owner hasn't yet been told about `role` sitting above
+    the bot with these powers. Remembered across restarts, so a redeploy
+    doesn't repeat it; changing the role's permissions warns again."""
+    warned = store.load("guard", {"warned": {}})
+    if warned["warned"].get(str(role.id)) == role.permissions.value:
+        return False
+    warned["warned"][str(role.id)] = role.permissions.value
+    store.save("guard", warned)
+    return True
+
+
+def _resolved(role):
+    """`role` no longer needs a warning; if it ever does again, say so."""
+    warned = store.load("guard", {"warned": {}})
+    if warned["warned"].pop(str(role.id), None) is not None:
+        store.save("guard", warned)
 
 
 def stripped(permissions):
@@ -60,14 +80,15 @@ async def sweep(guild, report=None):
             continue
         if role >= guild.me.top_role:
             # Only the owner can make a role the bot can't edit. Say so,
-            # once per start, rather than let it pass quietly.
-            if stripped(role.permissions) is not None and role.id not in _warned:
-                _warned.add(role.id)
-                if report:
-                    await report(f"The role {role.name} has moderation permissions and "
-                                 "sits above the bot, so only the server owner can "
-                                 "change it.")
+            # once, rather than let it pass quietly.
+            if stripped(role.permissions) is None:
+                _resolved(role)
+            elif _first_warning(role) and report:
+                await report(f"The role {role.name} has moderation permissions and "
+                             "sits above the bot, so only the server owner can "
+                             "change it.")
             continue
+        _resolved(role)
         new = stripped(role.permissions)
         if new is not None:
             taken = [n for n in NAMES if getattr(role.permissions, n)]
