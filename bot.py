@@ -102,6 +102,7 @@ class Bot(discord.Client):
         try:
             await layout.build(home)
             await pickers.install(home)
+            await actions.offer_opt_in(home)
             await admins.log_channel(home)
             await guard.sweep(home, self.report)
         except discord.HTTPException as e:

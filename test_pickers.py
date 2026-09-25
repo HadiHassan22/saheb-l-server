@@ -8,12 +8,14 @@ import shutil
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
 import discord
 
 import actions
+import assistant
 import layout
 import pickers
 import quick
@@ -131,8 +133,9 @@ class Making(WithGuild):
         self.assertEqual((len(edited.options), edited.max_values), (3, 3))
         await self.carry_out(kind=actions.PICKER_DELETE, picker="From")
         self.messages[0].delete.assert_awaited_once()
-        self.assertEqual(pickers.all_pickers(), [])
-        self.assertIn(10, actions.voted_roles())
+        self.assertEqual(pickers.made_by_members(), [])
+        # Its roles stay, and can still be taken, in the Opt-in roles picker.
+        self.assertEqual(pickers.find(pickers.OPT_IN)["roles"], [10, self.roles[-1].id])
 
     async def test_a_deleted_role_leaves_its_pickers(self):
         await self.carry_out(kind=actions.PICKER_CREATE, title="From",
@@ -187,6 +190,82 @@ class Access(WithGuild):
         with mock.patch.object(actions, "core_ids", lambda g: {30}):
             self.assertIn("hidden", await actions.check(self.guild, {
                 "kind": actions.ACCESS, "channel": "politics-and-religion", "roles": ["X"]}))
+
+
+class OptIn(WithGuild):
+    """Every role members can join is in a picker in #roles."""
+
+    def auto(self):
+        return [p for p in pickers.all_pickers() if p.get("auto")]
+
+    async def test_a_new_opt_in_role_can_be_taken_in_roles_at_once(self):
+        await self.carry_out(kind=actions.ROLE_CREATE, name="Gamers")
+        picker = pickers.find(pickers.OPT_IN)
+        self.assertEqual((picker["roles"], picker["one"]), ([self.roles[-1].id, 10], False))
+        options = self.messages[-1].sent[1]["view"].children[0].item.options
+        self.assertEqual([o.label for o in options], ["Gamers", "Lebanese", "None of these"])
+        self.assertIn("Some open a channel", self.messages[-1].sent[0])
+
+    async def test_a_role_leaves_it_when_another_picker_offers_it_or_it_closes(self):
+        await actions.offer_opt_in(self.guild)
+        self.assertEqual(pickers.find(pickers.OPT_IN)["roles"], [10])
+        await self.carry_out(kind=actions.PICKER_CREATE, title="From", roles=["Lebanese"])
+        self.assertEqual(self.auto(), [])  # Lebanese is offered by From now
+        self.messages[0].delete.assert_awaited_once()
+        await self.carry_out(kind=actions.ROLE_CREATE, name="Gamers")
+        await self.carry_out(kind=actions.ROLE_EDIT, role="Gamers", joinable=False)
+        self.assertEqual(self.auto(), [])
+
+    async def test_more_roles_than_a_dropdown_holds_make_a_second_picker(self):
+        store.save("roles", {str(200 + n): {"joinable": True} for n in range(30)})
+        self.roles.extend(role(200 + n, f"Role {n:02}") for n in range(30))
+        await actions.offer_opt_in(self.guild)
+        titles = sorted((p["title"], len(p["roles"])) for p in self.auto())
+        self.assertEqual(titles, [(pickers.OPT_IN, 24), (f"{pickers.OPT_IN} (2)", 6)])
+
+    async def test_the_bots_own_picker_cant_be_changed_directly(self):
+        await actions.offer_opt_in(self.guild)
+        problem = await actions.check(self.guild, {"kind": actions.PICKER_DELETE,
+                                                   "picker": pickers.OPT_IN})
+        self.assertIn("keeps", problem)
+
+
+class Grouping(WithGuild):
+    """A new role goes in the picker it belongs to, made the first time."""
+
+    async def test_a_gamer_role_then_movie_night_both_land_in_interests(self):
+        said, action = await self.carry_out(kind=actions.ROLE_CREATE, name="Gamer",
+                                            picker="Interests")
+        self.assertIn("in the Interests picker", said)
+        self.assertIn("made with it", actions.describe(action)[1])
+        gamer = self.roles[-1]
+        self.assertTrue(gamer.created_with["mentionable"])  # members can ping it
+        await self.carry_out(kind=actions.ROLE_CREATE, name="Movie night", picker="interests")
+        interests = pickers.find("Interests")
+        self.assertEqual((interests["roles"], interests["one"]),
+                         ([gamer.id, self.roles[-1].id], False))
+        self.assertEqual(len(pickers.made_by_members()), 1)
+        self.assertNotIn(gamer.id, pickers.find(pickers.OPT_IN)["roles"])
+
+    async def test_a_new_kind_of_role_starts_its_own_pick_one_picker(self):
+        await self.carry_out(kind=actions.ROLE_CREATE, name="Gamer", picker="Interests")
+        await self.carry_out(kind=actions.ROLE_CREATE, name="+18", picker="Age", one=True)
+        await self.carry_out(kind=actions.ROLE_CREATE, name="-18", picker="Age")
+        age = pickers.find("Age")
+        self.assertEqual((len(age["roles"]), age["one"]), (2, True))
+        self.assertEqual(sorted(p["title"] for p in pickers.made_by_members()),
+                         ["Age", "Interests"])
+
+    async def test_a_role_nobody_joins_goes_in_no_picker(self):
+        said, _ = await self.carry_out(kind=actions.ROLE_CREATE, name="Staff",
+                                       joinable=False, picker="Interests")
+        self.assertNotIn("picker", said)
+        self.assertIsNone(pickers.find("Interests"))
+
+    def test_the_bot_is_told_which_pickers_exist(self):
+        pickers.save({"title": "Interests", "roles": [1, 2], "one": False, "message_id": None})
+        prompt = assistant.system(datetime(2026, 9, 25, tzinfo=timezone.utc))
+        self.assertIn("Pickers in #roles now: Interests (pick any, 2 roles).", prompt)
 
 
 class Picking(WithGuild):

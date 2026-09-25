@@ -8,6 +8,10 @@ piece of code here answers every picker, so a new one needs no code
 change. Picking only adds and removes that picker's roles, which are made
 by vote and carry no powers. The name colors have their own picker
 (colors.py).
+
+Every role members can join that no other picker offers is offered in
+"Opt-in roles", a picker the bot keeps itself (`sync_opt_in`): a role made
+opt-in, like one that opens a channel, can always be taken in #roles.
 """
 
 import logging
@@ -22,6 +26,7 @@ log = logging.getLogger("pickers")
 MAX_PICKERS = 10
 MAX_ROLES = 24  # a dropdown holds 25 options, and one is "None of these"
 NONE = "none"
+OPT_IN = "Opt-in roles"
 
 
 def _saved():
@@ -76,7 +81,36 @@ def changes(held, chosen, picker):
 
 def text(picker):
     how = "Pick one." if picker["one"] else "Pick any that fit."
+    if picker.get("auto"):
+        how = "Pick any you want. Some open a channel that only their holders see."
     return f"**{picker['title']}**\n{how}"[:2000]
+
+
+def made_by_members():
+    """The pickers made by vote or an admin, not the ones the bot keeps."""
+    return [p for p in all_pickers() if not p.get("auto")]
+
+
+async def sync_opt_in(guild, joinable):
+    """Offer every role in `joinable` (ids of roles members can join) that
+    no other picker offers in the Opt-in roles picker, split in two or more
+    if there are more than a dropdown holds. It appears when the first such
+    role does and goes when the last one does."""
+    offered = {r for p in made_by_members() for r in p["roles"]}
+    wanted = sorted((r for r in joinable if r not in offered and guild.get_role(r)),
+                    key=lambda r: guild.get_role(r).name.lower())
+    chunks = [wanted[i:i + MAX_ROLES] for i in range(0, len(wanted), MAX_ROLES)]
+    kept = sorted((p for p in all_pickers() if p.get("auto")), key=lambda p: p["no"])
+    for i, chunk in enumerate(chunks):
+        title = OPT_IN if i == 0 else f"{OPT_IN} ({i + 1})"
+        picker = kept[i] if i < len(kept) else {"no": None, "message_id": None,
+                                                "auto": True, "one": False}
+        if picker.get("roles") != chunk or picker.get("title") != title:
+            picker.update(title=title, roles=chunk)
+            await show(guild, save(picker))
+    for extra in kept[len(chunks):]:
+        await hide(guild, extra)
+        forget(extra["no"])
 
 
 class PickerSelect(discord.ui.DynamicItem[discord.ui.Select],

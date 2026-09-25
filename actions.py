@@ -256,6 +256,9 @@ def _check_role(guild, action):
             return "There are already as many roles as the server allows by vote."
         action["name"] = name
         action["joinable"] = bool(action.get("joinable", True))
+        problem = _check_role_picker(action)
+        if problem:
+            return problem
     else:
         role = guild.get_role(action.get("role_id") or 0) or discord.utils.get(
             guild.roles, name=str(action.get("role") or "").strip().lstrip("@"))
@@ -309,12 +312,15 @@ def _check_picker(guild, action):
         picker = pickers.get(action.get("picker_no") or 0) or pickers.find(action.get("picker"))
         if picker is None:
             return "There's no picker by that name. Ask me to list the roles to see them."
+        if picker.get("auto"):
+            return (f"The bot keeps {picker['title']} itself: it offers every role members "
+                    "can join that no other picker does. Change the roles instead.")
         action["picker_no"], action["picker"] = picker["no"], picker["title"]
         if kind == PICKER_DELETE:
             return None
         if all(action.get(k) is None for k in ("title", "roles", "one")):
             return "Say what to change: its title, its roles, or whether members pick one."
-    elif len(pickers.all_pickers()) >= pickers.MAX_PICKERS:
+    elif len(pickers.made_by_members()) >= pickers.MAX_PICKERS:
         return f"There are already {pickers.MAX_PICKERS} pickers, which is the most."
     if action.get("title") is not None:
         title = str(action["title"]).strip()[:100]
@@ -335,6 +341,23 @@ def _check_picker(guild, action):
         return "Say which roles the picker offers."
     if action.get("one") is not None or kind == PICKER_CREATE:
         action["one"] = bool(action.get("one", True))
+    return None
+
+
+def _check_role_picker(action):
+    """A new role members can join goes in a picker in #roles: `picker`
+    names one that exists, or a new one (members pick any, unless `one`)."""
+    title = str(action.get("picker") or "").strip()[:100]
+    found = pickers.find(title) if title else None
+    if not title or not action["joinable"] or (found and found.get("auto")):
+        action.pop("picker", None)  # the Opt-in roles picker offers it anyway
+        return None
+    if found is None and len(pickers.made_by_members()) >= pickers.MAX_PICKERS:
+        return f"There are already {pickers.MAX_PICKERS} pickers; put it in one of those."
+    if found is not None and len(found["roles"]) >= pickers.MAX_ROLES:
+        return f"The picker {found['title']} is full."
+    action["picker"] = found["title"] if found else title
+    action["new_picker"] = found is None
     return None
 
 
@@ -474,7 +497,7 @@ def describe(action):
                           + " or ".join(f"**{r}**" for r in a["roles"])
                           + f" can see **{a['channel']}**. Anyone can join "
                           + ("that role" if len(a["roles"]) == 1 else "those roles")
-                          + " by asking the bot."
+                          + " in #roles or by asking the bot."
                           + (" New roles, made with it and giving no powers: "
                              + ", ".join(a["new_roles"]) + "." if a.get("new_roles") else ""))),
         CATEGORY_CREATE: lambda: (f"Create the category {a['name']}",
@@ -485,8 +508,12 @@ def describe(action):
                                   f"Delete the empty category **{a['category']}**."),
         ROLE_CREATE: lambda: (f"Create the role {a['name']}", f"Create the role **{a['name']}**"
                               + (f" in {a['color']}" if a.get("color") else "")
-                              + (". Members can join and leave it themselves by asking the bot."
-                                 if a["joinable"] else ".")
+                              + ((f". Members take it in the **{a['picker']}** picker in "
+                                  "#roles" + (", made with it" if a.get("new_picker") else "")
+                                  + ", or by asking the bot, and anyone can ping it."
+                                  if a.get("picker") else
+                                  ". Members take it in #roles or by asking the bot, and "
+                                  "anyone can ping it.") if a["joinable"] else ".")
                               + " Like every role here, it gives no powers."),
         ROLE_EDIT: lambda: (f"Change the role {a['role']}", f"Change **{a['role']}**: "
                             + ", ".join(f"{k} to {a[k]}" for k in ("name", "color", "joinable")
@@ -548,8 +575,23 @@ def _picker_details(a):
 
 # ---------- carrying out ----------
 
+async def offer_opt_in(guild):
+    """Bring the Opt-in roles picker in #roles up to date (pickers.py)."""
+    await pickers.sync_opt_in(guild, [r for r, v in voted_roles().items() if v["joinable"]])
+
+
 async def carry_out(guild, action):
     """Make the change. Returns a sentence saying what happened."""
+    said = await _carry_out(guild, action)
+    if action["kind"] in ROLE_KINDS + PICKER_KINDS + (ACCESS,):
+        try:
+            await offer_opt_in(guild)
+        except discord.HTTPException as e:
+            log.warning(f"the Opt-in roles picker wasn't updated: {e!r}")
+    return said
+
+
+async def _carry_out(guild, action):
     problem = await check(guild, action)
     if problem:
         return f"It couldn't be done: {problem}"
@@ -664,7 +706,14 @@ async def _carry_out_role(guild, a):
             permissions=discord.Permissions.none(), hoist=False,
             mentionable=a["joinable"], reason=REASON)
         _save_role(role.id, a["joinable"])
-        return f"Done: the role {role.name} exists."
+        if not a.get("picker"):
+            return f"Done: the role {role.name} exists."
+        picker = pickers.find(a["picker"]) or {"no": None, "message_id": None,
+                                               "title": a["picker"], "roles": [],
+                                               "one": bool(a.get("one", False))}
+        picker["roles"] = picker["roles"] + [role.id]
+        await pickers.show(guild, pickers.save(picker))
+        return f"Done: the role {role.name} exists, in the {picker['title']} picker in #roles."
     role = guild.get_role(a["role_id"])
     if kind == ROLE_DELETE:
         await role.delete(reason=REASON)

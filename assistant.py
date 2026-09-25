@@ -59,7 +59,8 @@ SYSTEM = """You are Saheb l Server, the AI that runs this Discord server, chatti
 How to answer:
 - Work out what the member actually wants before reaching for a tool. A greeting, small talk, or a question about you or how the server works needs a plain answer, not a tool.
 - Use a tool only when it does exactly what they asked. Never stretch one to something that merely looks similar: the server's name and icon are not your own name and picture, and a category is not a channel. If no tool does it, say so plainly, and offer a general proposal if it's something the server could want.
-- If a request is unclear (which channel, which member, what value), ask one short question instead of guessing.
+- Decide the details yourself instead of asking: a sensible name, color, picker or setting. A request like "create a gamer role" is enough: make it joinable, put it in the picker it belongs to, and say what you chose. Ask one short question only when you can't tell what they mean at all, like which member.
+- Choosing a role's picker: use an existing picker when the role is the same kind of thing as its roles (Movie night goes where Gamer is). When it's a new kind of thing, start a new picker with a short title for the group: Interests for hobbies and pings (members pick any), Where you're from for Lebanese or International, Age for -18 or +18 (members pick one, since the choices exclude each other).
 - Say something was done only when a tool said it was. State facts about the server only from what a tool told you.
 - Reply in the member's language and style: English, Lebanese Arabic or Arabizi. Be brief and natural: one to three sentences. Never use an em dash (—); use a comma, a colon, or a separate sentence instead.
 
@@ -78,7 +79,13 @@ It is now {now} in Beirut."""
 
 
 def system(now):
-    return SYSTEM.format(now=now.astimezone(quick.BEIRUT).strftime("%A %Y-%m-%d %H:%M"))
+    prompt = SYSTEM.format(now=now.astimezone(quick.BEIRUT).strftime("%A %Y-%m-%d %H:%M"))
+    made = pickers.made_by_members()
+    if made:
+        prompt += "\n\nPickers in #roles now: " + "; ".join(
+            f"{p['title']} ({'pick one' if p['one'] else 'pick any'}, "
+            f"{len(p['roles'])} roles)" for p in made) + "."
+    return prompt
 
 
 def _tool(name, description, properties=None, required=()):
@@ -139,9 +146,9 @@ TOOLS = [
                 "delete_channel (channel), set_topic (channel, topic), set_slowmode "
                 "(channel, slowmode in seconds), purge_channel (channel: delete every "
                 "message in it, without deleting the channel itself), set_channel_access "
-                "(channel, roles: only members with one of these roles see it, and anyone "
-                "can join them; missing roles are created; no roles opens it to everyone "
-                "again). Categories: create_category (name), rename_category (category, "
+                "(channel, roles: only members with one of these roles see it; anyone can "
+                "take them in #roles; missing roles are created; no roles opens it to "
+                "everyone again). Categories: create_category (name), rename_category (category, "
                 "name), delete_category (category).",
                 actions.CHANNEL_KINDS,
                 {"channel": S, "category": S, "name": S,
@@ -149,9 +156,14 @@ TOOLS = [
                  "topic": S, "slowmode": I, "roles": {"type": "array", "items": S}}),
     _draft_tool("draft_role_change",
                 "Draft a proposal about a role. Roles give no powers. create_role (name, "
-                "color like #1E88E5, joinable), edit_role (role, and any of name, color, "
-                "joinable), delete_role (role).",
-                actions.ROLE_KINDS, {"role": S, "name": S, "color": S, "joinable": B}),
+                "color like #1E88E5, joinable: members take it themselves and can ping it, "
+                "true unless asked otherwise; picker: the #roles picker it belongs in: an "
+                "existing one if the role is the same kind of thing as its roles, else a new "
+                "short group title like Interests, Where you're from or Age; one: for a new "
+                "picker, true when its choices exclude each other, like age groups), edit_role (role, and any of name, "
+                "color, joinable), delete_role (role).",
+                actions.ROLE_KINDS, {"role": S, "name": S, "color": S, "joinable": B,
+                                     "picker": S, "one": B}),
     _draft_tool("draft_emoji_change",
                 "Draft a proposal to add an emoji (name, and an image attached to the "
                 "member's message) or remove one (name).",

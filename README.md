@@ -237,12 +237,21 @@ in `#ask-saheb`. A color only changes how a name looks: the roles carry no
 permissions, sit at the bottom of the role list, and a member holds one at
 a time. The list is in `colors.py`, so changing it is a proposal.
 
-Other pickers in `#roles` are made by vote, or at once by an admin, just by
-asking the bot: "a picker for Lebanese or International", say. Each is a
+Other pickers in `#roles` group the roles members give themselves. Ask for
+a role ("create a gamer role") and the bot files it under the picker it
+belongs to, Interests say, or starts a new one when it's a new kind of
+thing (Age, pick one, for -18 or +18). Later roles of the same kind land in
+the same picker. Pickers can also be asked for directly: "a picker for
+Lebanese or International", say. Each is a
 title and up to 24 roles made by vote, where members pick one or any that
 fit, and the roles it names that don't exist yet are made with it. Joining
 one of a pick-one picker's roles by asking the bot leaves the others. A
 role can also make a channel opt-in: only members who hold it see it.
+
+Every role members can join is always in a picker. One no other picker
+offers is in **Opt-in roles**, a picker the bot keeps itself: a new opt-in
+role, like one for a hidden channel, appears there at once, and leaves it
+when it's deleted, can't be joined any more, or gets a picker of its own.
 
 ## Voting
 
