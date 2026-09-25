@@ -6,6 +6,10 @@ first start it builds the layout below, adopting Discord's default
 categories. On every start after that it recreates anything missing and
 brings the AutoMod rules and the #welcome and #rules posts up to date.
 Channels are remembered by id, so renaming one changes nothing.
+
+Once the server is a Community server, Discord has a rules channel of its
+own (Server Settings, Safety Setup) and points new members at it. The bot
+uses that one as #rules, so the rules are where Discord sends people.
 """
 
 import logging
@@ -140,6 +144,26 @@ def _overwrites(kind, guild):
     return {}
 
 
+async def _adopt_rules_channel(guild, saved, category):
+    """Use Discord's own rules channel as #rules, if the server has one
+    and it isn't #rules already. The #rules the bot built before is
+    deleted, but only if nobody but the bot ever posted in it."""
+    rules = guild.rules_channel
+    if rules is None or saved["channels"].get("rules") == rules.id:
+        return
+    old = guild.get_channel(saved["channels"].get("rules") or 0)
+    saved["channels"]["rules"] = rules.id
+    saved["messages"].pop("rules", None)
+    await rules.edit(category=category, overwrites=_overwrites(READ_ONLY, guild))
+    if old is None:
+        return
+    try:
+        if all(m.author.id == guild.me.id for m in [m async for m in old.history(limit=50)]):
+            await old.delete(reason="The rules moved to the server's rules channel")
+    except discord.HTTPException as e:
+        log.warning(f"the old #rules was not deleted: {e!r}")
+
+
 def _adoptable(guild, name, kind):
     """Discord's default channel of this name, on the first build only."""
     kind_class = discord.VoiceChannel if kind in (VOICE, AFK) else discord.TextChannel
@@ -165,6 +189,8 @@ async def build(guild):
         if category is None:
             category = await guild.create_category(category_name)
         saved["channels"][f"category:{category_name}"] = category.id
+        if any(spec["name"] == "rules" for spec in channels):
+            await _adopt_rules_channel(guild, saved, category)
         for spec in channels:
             name, kind = spec["name"], spec["kind"]
             if name in saved["removed"]:

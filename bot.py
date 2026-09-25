@@ -134,7 +134,7 @@ class Bot(discord.Client):
         await moderator.on_automod_action(execution)
 
     async def on_message(self, message):
-        await chat.on_message(message)
+        await chat.on_message(message, self)
 
 
 if __name__ == "__main__":

@@ -22,10 +22,12 @@ in the repository's history.
 ## Values that can't be changed
 
 These live in files a proposal may otherwise change. The check compares
-them with the version currently running.
+them with the version currently running. A proposal an admin shipped
+without a vote may also narrow or remove setting ranges and change the
+protected channels; the safety floor and rules 4 to 6 hold for everyone.
 
-- **Setting ranges.** No setting in `settings.py` can be removed, and the
-  minimum and maximum of each can't change. New settings can be added.
+- **Setting ranges.** No setting in `settings.py` can be removed, and no
+  range can narrow: a range can widen, and new settings can be added.
 - **The safety floor:**
   - every AutoMod rule that blocks, and every blocked word and pattern
     (scams and phone numbers), stays in `automod.py`. More can be added;
@@ -36,11 +38,6 @@ them with the version currently running.
   - the self-harm support message keeps Embrace's lifeline (1564), and the
     score that triggers it can't be raised (`judge.SUPPORT_AT`).
 
-- **What members get without a vote.** The things the bot does the
-  moment any member asks (the personal and light tiers in `assistant.py`)
-  can't grow: no tool can be added to them or moved into them. Tools can
-  be removed from them, or added as drafts that need a vote. What admins
-  can do without a vote is not limited by this (see below).
 - **The channels the bot depends on** (`actions.CORE`) stay protected
   from being renamed or deleted by vote.
 - **The rules.** Rules 4 to 6 stay fixed (`conduct.FIXED`), and their
@@ -55,9 +52,10 @@ them with the version currently running.
   (`admins.py`), and no other file may touch the stored list. What admins
   can do is not protected: it is up to the owner, and an admin's code
   change can extend it. Today admins can do anything a vote can, at once,
-  and withdraw any open proposal. They act only through the bot, which
-  posts every admin action in `#server-log` with who did it; a change
-  that lets an admin act without that record is refused.
+  just by asking the bot, and withdraw any open proposal. They act only
+  through the bot, which posts every admin action in `#server-log` with
+  who did it; a change that lets an admin act without that record is
+  refused.
 - Show members where the code is kept. The repository is on the owner's
   own GitHub account, and linking to it from the server would identify
   them. No message, embed or answer members can see may contain a GitHub

@@ -10,10 +10,8 @@ not protected (an admin's code change can extend it); who they are is:
   Discord powers (guard.py), and holding it without being on the list does
   nothing. The owner counts as an admin without being on it.
 - Admins act through the bot, never with Discord's own tools, so every
-  admin action is posted in #server-log with who did it. Today they can do
-  anything a vote can, at once (Ship it, in chat.py), withdraw any open
-  proposal (/admin withdraw, voting_ui.py) and switch #ask-saheb's rate
-  limit (/admin chat-limit, chat.py).
+  admin action is posted in #server-log with who did it. What they can do
+  is listed in README.md, not here, since it can grow by code change.
 """
 
 import logging

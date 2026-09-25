@@ -243,6 +243,82 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(filed[1]["value"], 8)
 
 
+    async def test_an_admins_request_is_done_at_once_except_deleting(self):
+        async def ship(client, guild, opener, admin_id):
+            p = proposals.pass_now(opener(NOW)["no"], admin_id, NOW)
+            return p, "Done: slowmode in <#2> is 30 seconds."
+        ship = mock.AsyncMock(side_effect=ship)
+        ctx = assistant.Context(guild=self.guild, member=types.SimpleNamespace(
+            id=7, display_name="Hadi"), admin=True)
+        with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=[
+                reply(calls=[("draft_channel_change", {"change": "set_slowmode",
+                                                       "channel": "cars", "slowmode": 30}),
+                             ("draft_channel_change", {"change": "delete_channel",
+                                                       "channel": "cars"})]),
+                reply("Done, and confirm the deletion.")])) as calls, \
+                mock.patch("voting_ui.ship", ship):
+            await assistant.respond(ctx, [], "slow #cars down, then delete it")
+        ship.assert_awaited_once()
+        results = next(t for t in calls.call_args.args[1] if t["role"] == "tool")["results"]
+        done, deleting = [json.loads(r["result"]) for r in results]
+        self.assertIn("30 seconds", done["result"])
+        self.assertEqual(proposals.all_proposals()[0]["shipped_by"], 7)
+        self.assertIn("Ship it", deleting["note"])
+        self.assertEqual([d["title"] for d in ctx.drafts], ["Delete cars"])
+
+    async def test_a_member_who_isnt_an_admin_only_gets_a_draft(self):
+        with mock.patch("voting_ui.ship", mock.AsyncMock()) as ship:
+            ctx, _, _ = await self.talk(
+                reply(calls=[("draft_setting_change", {"setting": "quorum", "value": 8})]),
+                reply("Drafted."))
+        ship.assert_not_awaited()
+        self.assertEqual(len(ctx.drafts), 1)
+        self.assertEqual(proposals.all_proposals(), [])
+
+
+class Shipping(WithTempData, unittest.IsolatedAsyncioTestCase):
+    """voting_ui.ship: an admin's request from #ask-saheb, done at once."""
+
+    async def ship(self, opener, hooks=()):
+        message = types.SimpleNamespace(id=70, jump_url="https://discord.com/x",
+                                        create_thread=mock.AsyncMock())
+        channel = types.SimpleNamespace(id=6, send=mock.AsyncMock(return_value=message))
+        logged = mock.AsyncMock()
+        with mock.patch.object(layout, "channel", lambda g, name: channel), \
+                mock.patch.object(layout, "server_log", logged), \
+                mock.patch.object(layout, "post_texts", mock.AsyncMock()), \
+                mock.patch.object(voting_ui, "AFTER_CLOSE", list(hooks)):
+            p, said = await voting_ui.ship(None, object(), opener, 7)
+        return p, said, channel, logged
+
+    async def test_it_passes_posts_logs_and_says_what_was_done(self):
+        action = {"kind": actions.TOPIC, "channel": "cars", "topic": "Vroom"}
+        done = mock.AsyncMock(return_value="Done: <#2> has its new topic.")
+        p, said, channel, logged = await self.ship(
+            lambda now: proposals.open_action(7, action, "Topic", "Vroom", now), [done])
+        self.assertEqual((p["status"], p["shipped_by"]), (proposals.PASSED, 7))
+        self.assertEqual(proposals.get(p["no"])["message_id"], 70)
+        channel.send.assert_awaited_once()
+        self.assertIn("<@7> passed proposal", logged.call_args.args[1])
+        self.assertEqual(said, "Done: <#2> has its new topic.")
+
+    async def test_a_setting_or_code_change_says_what_happens_next(self):
+        _, said, _, _ = await self.ship(lambda now: proposals.open_proposal(
+            7, "", "", now, setting="quorum", value=8))
+        self.assertIn("is now at least 8 votes", said)
+        self.assertEqual(settings.current()["quorum"], 8)
+        _, said, _, _ = await self.ship(lambda now: proposals.open_proposal(
+            7, "Trivia", "A trivia game.", now))
+        self.assertIn("code change", said)
+
+    async def test_a_refused_opener_opens_nothing(self):
+        def refuse(now):
+            raise proposals.Refused("No.")
+        with self.assertRaises(proposals.Refused):
+            await self.ship(refuse)
+        self.assertEqual(proposals.all_proposals(), [])
+
+
 class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
     def test_each_member_is_rate_limited_on_their_own(self):
         self.assertTrue(all(chat.allowed(1, NOW + i) for i in range(chat.PER_WINDOW)))

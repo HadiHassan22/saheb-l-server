@@ -553,7 +553,8 @@ async def _carry_out_member(guild, a):
         return f"Done: {a['member_name']} is unbanned."
     member = await guild.fetch_member(target)
     try:
-        await member.send(f"A community vote in {guild.name} decided to "
+        who = "An admin of" if a.get("by_admin") else "A community vote in"
+        await member.send(f"{who} {guild.name} decided to "
                           f"{'ban' if a['kind'] == BAN else 'remove'} you. "
                           f"The reason given: {a.get('reason', '')}")
     except discord.HTTPException:
@@ -571,12 +572,13 @@ async def settle(client, p):
         return
     guild = client.get_guild(layout.home_id() or 0)
     try:
-        said = await carry_out(guild, dict(p["action"]))
+        said = await carry_out(guild, {**p["action"], "by_admin": bool(p.get("shipped_by"))})
     except (discord.HTTPException, OSError) as e:
         said = f"It couldn't be done: {getattr(e, 'status', '') or e.__class__.__name__}."
     log.info(f"proposal {p['no']}: {said}")
     await voting_ui.reply_to(client, p, said)
     await layout.server_log(guild, f"Proposal {p['no']} ({p['title']}): {said}")
+    return said
 
 
 def setup():

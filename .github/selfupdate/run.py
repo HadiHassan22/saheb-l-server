@@ -96,7 +96,7 @@ def implement_prompt(p):
 
 - Read README.md and PROTECTED.md first. Never edit the files PROTECTED.md lists, never change the values it protects, and never read or write secrets, environment variables, or anything outside this repository. A change that does is rejected automatically.
 - Make the smallest change that does what the proposal says, in the style of the code around it. Add or update tests (test_*.py) and the README where behaviour changes.
-- You can't run commands. The tests are run after you finish, and you'll get one chance to fix them if they fail.
+- You can't run commands. The tests, the protected-core check and a security review run after you finish; if any of them fails, you'll be told why and get one chance to fix it.
 - If the proposal needs no code change (for example, it is a decision about something outside the bot), or can't be done without touching the protected core or breaking Discord's Terms of Service, change no files.
 - When you're done, write .selfupdate-summary.md: two to five plain sentences for the server's members saying what you changed and why, or why you changed nothing. No code, and no links.
 
@@ -192,39 +192,57 @@ def confirm_or_roll_back(p, sha):
     sys.exit(f"Proposal {p['no']} was rolled back: {url}")
 
 
+def refused_prompt(problems):
+    return f"""The automatic checks refused your change, for these reasons:
+
+{chr(10).join(f"- {problem}" for problem in problems)}
+
+Change it so it still does what the proposal asks, in a way these checks allow: keep what they protect and reach the same result another way. The same rules apply. If it can't be done in an allowed way, change nothing more and say why in .selfupdate-summary.md; otherwise update the summary if what you changed is now different."""
+
+
 def attempt(p, branch):
-    """Write and check the change. Returns (outcome, body)."""
+    """Write and check the change. If a check refuses it, Claude Code is
+    told why and gets one more try. Returns (outcome, body)."""
     run("npm", "install", "-g", "@anthropic-ai/claude-code", timeout=300)
     claude(implement_prompt(p))
     summary = take_summary()
     if not changed():
         return "no-change", summary or "No files needed changing."
-    passed, output = tests()
-    if not passed:
-        claude(fix_prompt(output))
-        summary = take_summary() or summary
-        passed, output = tests()
-    run("git", "add", "-A")
-    run("git", "commit", "-m", f"Proposal {p['no']}: {p['title']}"[:250])
-    diff = run("git", "diff", "origin/main", "HEAD").stdout
-    if protected.contains_secret(diff):
-        run("git", "reset", "--hard", "origin/main")
-        return "failed", ("The change contained something that looks like a secret, "
-                          "so it was discarded without being published.")
-    problems = [] if passed else ["The tests fail:\n```\n" + output[-3000:] + "\n```"]
     base = TEMP / "base"
     run("git", "worktree", "add", "--force", str(base), "origin/main")
-    problems += protected.check(str(base))
-    if not problems:
-        import review  # needs the bot's dependencies, which the workflow installs
-        approved, found = asyncio.run(review.review(
-            f"Proposal {p['no']}: {p['title']}\n({approval(p)})\n\n{p['details']}", diff))
-        if not approved:
-            problems += found or ["The security review did not approve it."]
-    if problems:
-        return "failed", (summary + "\n\n**Why it wasn't merged**\n"
-                          + "\n".join(f"- {problem}" for problem in problems))
-    return "merged", summary
+    for last_try in (False, True):
+        passed, output = tests()
+        if not passed:
+            claude(fix_prompt(output))
+            summary = take_summary() or summary
+            passed, output = tests()
+        run("git", "add", "-A")
+        run("git", "commit", "--allow-empty", "-m", f"Proposal {p['no']}: {p['title']}"[:250])
+        diff = run("git", "diff", "origin/main", "HEAD").stdout
+        if protected.contains_secret(diff):
+            run("git", "reset", "--hard", "origin/main")
+            return "failed", ("The change contained something that looks like a secret, "
+                              "so it was discarded without being published.")
+        if not diff.strip():
+            return "no-change", summary or "No files needed changing."
+        problems = [] if passed else ["The tests fail:\n```\n" + output[-3000:] + "\n```"]
+        problems += protected.check(str(base), admin=bool(p.get("shipped")))
+        if not problems:
+            import review  # needs the bot's dependencies, which the workflow installs
+            approved, found = asyncio.run(review.review(
+                f"Proposal {p['no']}: {p['title']}\n({approval(p)})\n\n{p['details']}", diff))
+            if not approved:
+                problems += found or ["The security review did not approve it."]
+        if not problems:
+            return "merged", summary
+        if last_try:
+            break
+        claude(refused_prompt(problems))
+        summary = take_summary() or summary
+        if not changed():
+            break
+    return "failed", (summary + "\n\n**Why it wasn't merged**\n"
+                      + "\n".join(f"- {problem}" for problem in problems))
 
 
 def main():

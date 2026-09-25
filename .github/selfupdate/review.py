@@ -41,7 +41,7 @@ Reject the change if it does any of these:
 - breaks Discord's Terms of Service or Community Guidelines, for example mass-messaging, scraping or storing members' data without need, or making the bot act as a user;
 - lets anyone but the server owner choose who the admins are, or lets an admin act without the bot posting it in #server-log (giving admins more power is otherwise allowed);
 - shows members, in anything posted in Discord, a link to the GitHub repository or anything else that identifies the server owner;
-- does something materially different from, or more than, what the proposal asks for.
+- does something materially different from what the proposal asks for. Doing what it takes to carry the proposal out well (tests, the README, related changes it needs) is fine.
 
 Approve it otherwise. Don't reject a change for style, for being imperfect, or because you would have written it differently: only for the reasons above. List each problem in one plain sentence.
 

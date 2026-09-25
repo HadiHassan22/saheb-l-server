@@ -179,6 +179,37 @@ async def publish(interaction, opener, guild=None, by_admin=False):
         return await interaction.followup.send(str(e), ephemeral=True)
     if not by_admin:
         p = proposals.fit_quorum(p["no"], people(channel.guild))
+    message = await _post_card(p, channel)
+    await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
+                                    ephemeral=True)
+    if by_admin:
+        await _shipped(interaction.client, p, channel.guild, message)
+    return p
+
+
+async def ship(client, guild, opener, admin_id):
+    """What an admin asked for in #ask-saheb, done at once: the proposal
+    `opener(now)` opens is passed on their word, its card posted, and it
+    is carried out as a passed vote would be. Returns the proposal and a
+    sentence saying what came of it. Raises proposals.Refused if it can't be opened;
+    checking that `admin_id` is an admin is the caller's job."""
+    channel = layout.channel(guild, "proposals")
+    if channel is None:
+        raise proposals.Refused("The proposals channel isn't set up yet.")
+    p = opener(int(time.time()))
+    p = proposals.pass_now(p["no"], admin_id, int(time.time()))
+    message = await _post_card(p, channel)
+    said = await _shipped(client, p, guild, message)
+    if said:
+        return p, " ".join(said)
+    if p["kind"] == proposals.SETTING:
+        return p, (f"Done: {settings.SETTINGS[p['setting']]['label']} is now "
+                   f"{settings.describe(p['setting'], p['value'])}.")
+    return p, (f"Passed as proposal {p['no']}. It will be written as a code change, "
+               "checked and deployed automatically; progress is posted under its card.")
+
+
+async def _post_card(p, channel):
     view = vote_buttons(p) if p["status"] == proposals.OPEN else discord.utils.MISSING
     message = await channel.send(embed=card(p), view=view)
     proposals.attach_message(p["no"], channel.id, message.id)
@@ -186,29 +217,37 @@ async def publish(interaction, opener, guild=None, by_admin=False):
         await message.create_thread(name=f"Proposal {p['no']}: {p['title']}"[:100])
     except discord.HTTPException as e:
         log.warning(f"no thread for proposal {p['no']}: {e!r}")
-    await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
-                                    ephemeral=True)
-    if by_admin:
-        await layout.server_log(
-            channel.guild, f"<@{p['shipped_by']}> passed proposal {p['no']} ({p['title']}) "
-            f"without a vote, as an admin: {message.jump_url}")
-        await carry_out(interaction.client, p, channel.guild)
-    return p
+    return message
+
+
+async def _shipped(client, p, guild, message):
+    await layout.server_log(
+        guild, f"<@{p['shipped_by']}> passed proposal {p['no']} ({p['title']}) "
+        f"without a vote, as an admin: {message.jump_url}")
+    return await carry_out(client, p, guild)
 
 
 async def carry_out(client, p, guild):
-    """Do what a proposal an admin passed says, as when a vote passes it."""
+    """Do what a proposal an admin passed says, as when a vote passes it.
+    Returns what the hooks said about it."""
     if p["kind"] == proposals.SETTING:
         await layout.post_texts(guild)  # #welcome quotes the settings
-    await after_close(client, p)
+    return await after_close(client, p)
 
 
 async def after_close(client, p):
+    """Run every hook on a closed proposal. Returns what they said, for
+    hooks that say something (actions.settle, what it did)."""
+    said = []
     for hook in AFTER_CLOSE:
         try:
-            await hook(client, p)
+            result = await hook(client, p)
         except Exception as e:
             log.error(f"{hook.__name__} failed for proposal {p['no']}: {e!r}")
+            continue
+        if isinstance(result, str):
+            said.append(result)
+    return said
 
 
 @admins.group.command(name="withdraw",

@@ -8,6 +8,7 @@ import shutil
 import tempfile
 import types
 import unittest
+import unittest.mock
 import zlib
 from pathlib import Path
 
@@ -142,3 +143,46 @@ class Wearing(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RulesChannel(unittest.IsolatedAsyncioTestCase):
+    """Discord's own rules channel becomes #rules."""
+
+    def guild(self, rules, old, posters):
+        async def history(limit):
+            for author_id in posters:
+                yield types.SimpleNamespace(author=types.SimpleNamespace(id=author_id))
+        old.history = history
+        return types.SimpleNamespace(
+            rules_channel=rules, me=types.SimpleNamespace(id=1),
+            default_role=object(), get_channel={old.id: old}.get)
+
+    def channel(self, channel_id):
+        channel = types.SimpleNamespace(id=channel_id)
+        channel.edit = unittest.mock.AsyncMock()
+        channel.delete = unittest.mock.AsyncMock()
+        return channel
+
+    async def test_the_rules_move_and_the_bots_old_channel_goes(self):
+        rules, old = self.channel(50), self.channel(40)
+        saved = {"channels": {"rules": 40}, "messages": {"rules": 99}}
+        await layout._adopt_rules_channel(self.guild(rules, old, [1, 1]), saved, "cat")
+        self.assertEqual(saved, {"channels": {"rules": 50}, "messages": {}})
+        rules.edit.assert_awaited_once()
+        self.assertEqual(rules.edit.call_args.kwargs["category"], "cat")
+        old.delete.assert_awaited_once()
+
+    async def test_an_old_channel_members_posted_in_is_kept(self):
+        rules, old = self.channel(50), self.channel(40)
+        saved = {"channels": {"rules": 40}, "messages": {}}
+        await layout._adopt_rules_channel(self.guild(rules, old, [1, 7]), saved, "cat")
+        self.assertEqual(saved["channels"]["rules"], 50)
+        old.delete.assert_not_awaited()
+
+    async def test_nothing_changes_without_a_rules_channel_or_once_moved(self):
+        old = self.channel(40)
+        for rules in (None, old):
+            saved = {"channels": {"rules": 40}, "messages": {"rules": 99}}
+            await layout._adopt_rules_channel(self.guild(rules, old, [1]), saved, "cat")
+            self.assertEqual(saved, {"channels": {"rules": 40}, "messages": {"rules": 99}})
+        old.edit.assert_not_awaited()

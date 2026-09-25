@@ -73,10 +73,10 @@ class ProtectedValues(unittest.TestCase):
         # The real values, read the way the workflow reads them.
         cls.base = protected.snapshot(str(HERE))
 
-    def changed(self, edit):
+    def changed(self, edit, admin=False):
         head = copy.deepcopy(self.base)
         edit(head)
-        return protected.value_problems(self.base, head)
+        return protected.value_problems(self.base, head, admin)
 
     def test_the_snapshot_reads_the_running_code(self):
         self.assertEqual(self.base["ranges"]["quorum"], [3, 100])
@@ -93,14 +93,16 @@ class ProtectedValues(unittest.TestCase):
             h["support_at"] = 0.5
         self.assertEqual(self.changed(extend), [])
 
-    def test_setting_ranges_cant_move_or_disappear(self):
+    def test_setting_ranges_can_widen_but_only_an_admin_narrows_or_drops_one(self):
         def narrow(h):
-            h["ranges"]["quorum"] = [1, 100]
+            h["ranges"]["quorum"] = [4, 100]
             del h["ranges"]["review_percent"]
         found = self.changed(narrow)
-        self.assertIn("changes the range of the setting quorum from [3, 100] to [1, 100]",
+        self.assertIn("narrows the range of the setting quorum from [3, 100] to [4, 100]",
                       found)
         self.assertIn("removes the setting review_percent", found)
+        self.assertEqual(self.changed(narrow, admin=True), [])
+        self.assertEqual(self.changed(lambda h: h["ranges"].update(quorum=[1, 200])), [])
 
     def test_the_safety_floor_cant_be_lowered(self):
         def weaken(h):
@@ -113,21 +115,24 @@ class ProtectedValues(unittest.TestCase):
         found = self.changed(weaken)
         self.assertEqual(len(found), 6, found)
 
-    def test_nothing_new_happens_without_a_vote_and_the_core_stays(self):
+    def test_core_channels_move_only_for_an_admin_and_rules_4_to_6_never(self):
         def loosen(h):
-            h["instant_tools"].append("ban_member_now")
             h["core_channels"].remove("mod-log")
             h["fixed_rules"].remove(5)
             h["floor_rule_text"][0][1] = "Doxxing is fine."
-        found = self.changed(loosen)
-        self.assertEqual(found, [
-            "lets the bot do ban_member_now without a vote",
+        self.assertEqual(self.changed(loosen), [
             "lets a vote rename or delete #mod-log",
             "lets a vote change rule 5",
             "changes the text of rules 4 to 6",
         ])
-        tightened = self.changed(lambda h: h["instant_tools"].remove("pin_message"))
-        self.assertEqual(tightened, [])
+        self.assertEqual(self.changed(loosen, admin=True), [
+            "lets a vote change rule 5",
+            "changes the text of rules 4 to 6",
+        ])
+
+    def test_the_safety_floor_holds_for_an_admin_too(self):
+        found = self.changed(lambda h: h["block_words"].remove("free nitro"), admin=True)
+        self.assertEqual(len(found), 1, found)
 
 
 class Scans(unittest.TestCase):

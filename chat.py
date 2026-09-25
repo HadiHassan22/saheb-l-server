@@ -174,7 +174,7 @@ def strip_tag(content, me):
     return " ".join(content.split())
 
 
-async def on_message(message):
+async def on_message(message, client=None):
     if message.author.bot or message.guild is None:
         return
     if not (message.content.strip() or message.attachments):
@@ -192,8 +192,10 @@ async def on_message(message):
     if not allowed(message.author.id, now):
         return await message.reply("You've asked a lot in a short time. Give it a few "
                                    "minutes.", mention_author=False)
+    admin = admins.allowed(message.author.id, message.guild)
     ctx = assistant.Context(guild=message.guild, member=message.author,
-                            attachments=list(message.attachments))
+                            attachments=list(message.attachments),
+                            client=client, admin=admin)
     text = strip_tag(message.content, me)[:1500] or "(tagged you with no text)"
     others = [m for m in message.mentions if m.id != me.id]
     if others:
@@ -206,10 +208,9 @@ async def on_message(message):
         text += f"\n(Replying to your message: {replied.content[:500]})"
     if message.attachments:
         text += f"\n({len(message.attachments)} attachment(s))"
-    admin = admins.allowed(message.author.id, message.guild)
     if admin:
-        text += ("\n(This member is an admin: every draft you make for them also gets a "
-                 "Ship it button, which does it at once without a vote.)")
+        text += ("\n(This member is an admin: your draft tools do what they ask at once, "
+                 "without a vote, except deleting a channel or category.)")
     try:
         async with message.channel.typing():
             answer = await assistant.respond(ctx, history(message.author.id, now), text)

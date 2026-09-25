@@ -25,8 +25,10 @@ member with one vote like everyone else.
 
 **Admins.** Members the owner picks (they have the Admin role; see
 `/admin list`) look after the server while it's young. They can do
-anything a vote can, at once and without a vote: change channels, roles,
-settings and the rules, kick or ban, or have the bot's code changed. They
+anything a vote can, at once and without a vote: they ask the bot in
+#ask-saheb and it's done, whether that's changing channels, roles,
+settings or the rules, kicking or banning, or having the bot's code
+changed. Deleting a channel or category waits for them to confirm. They
 can also take down any open proposal. They act only through the bot,
 never with Discord's own tools, and everything they do is posted in
 #server-log with who did it.
@@ -67,7 +69,8 @@ as a code change, checked automatically and deployed, and what changed is
 posted under its proposal.
 
 **What votes can't change.** Who the admins are, the bot's access keys, the system that
-updates and rolls back its code, the range each setting can take, the
+updates and rolls back its code, how far each setting can go (a range
+can widen, but only an admin can narrow it), the
 safety floor (blocking scams, phone numbers and sexual content involving
 minors, and the self-harm support line), and anything Discord's Terms of
 Service require.
@@ -110,7 +113,10 @@ roles and puts the color picker in `#roles`.
 The layout is in `layout.py`. Once the server is running, channels change
 by vote (see below): a channel deleted by vote stays deleted.
 On every start it recreates anything missing and brings its AutoMod rules
-and the `#welcome` and `#rules` posts up to date. It runs one server: the
+and the `#welcome` and `#rules` posts up to date. Once the server is a
+Community server with a rules channel of Discord's own (Server Settings,
+Safety Setup), the bot uses that channel as `#rules` and deletes the one
+it built, if only the bot ever posted there. It runs one server: the
 first one it's invited to becomes its home, and it leaves any other.
 
 ## Talking to the bot
@@ -149,11 +155,14 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 - **Drafts are filed by the member, not the bot.** The reply carries a
   **File it** button that only the member who asked can press, once.
-- **Admins can skip any vote.** For an admin (picked by the owner with
-  `/admin add`, see `admins.py`; the owner counts as one), every draft
-  also gets a **Ship it** button: it is posted as already passed and
-  carried out like a passed vote. A code change still goes through the
-  self-update workflow's checks. `/admin withdraw` takes down any open
+- **Admins skip the vote.** For an admin (picked by the owner with
+  `/admin add`, see `admins.py`; the owner counts as one), what they ask
+  for is done at once: posted in `#proposals` as already passed and
+  carried out like a passed vote, and the bot says what came of it.
+  Deleting a channel or category is the exception: it comes back as a
+  draft with a **Ship it** button to confirm, since the history is lost
+  for good. A code change still goes through the self-update workflow's
+  checks. `/admin withdraw` takes down any open
   proposal, `/admin chat-limit` switches the chat limit, and `/admin
   github` shows admins, and only them, where the code is. Every admin
   action is posted in `#server-log`. What admins can do can grow by code
@@ -170,11 +179,13 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   `@everyone`, which only the bot can do.
 - **What it can't do for a member, whatever anyone says:** give anyone
   power, act on another member without a vote, change a moderation
-  decision, or skip a vote (admins' Ship it button is code, not a tool). There is no tool for
+  decision, or skip a vote. Whether a member is an admin is checked in
+  code, never decided by the model. There is no tool for
   any of it, and claiming to be the owner
   changes nothing. The channels the bot depends on can't be renamed or
-  deleted, even by vote. A code change can't add anything to the personal
-  or light tiers: only the owner can, by committing directly.
+  deleted, even by vote. A code change can add things members do at once
+  (the personal and light tiers), but none that lets a member act on
+  another.
 - **Costs.** The chat model (`ai.CHAT`, DeepSeek V4.1 Flash, picked with
   `chat_eval.py`) on the owner's OpenRouter key and monthly budget: about
   0.02 of a cent per answer, against 0.6 to 0.9 on Claude Haiku, which
@@ -285,8 +296,8 @@ Every number above is a setting the community can change by vote:
 | How sure the first check must be to act alone | 80% | 50% to 99% |
 | How likely a message must look to get a second look | 30% | 10% to 90% |
 
-The ranges are fixed in code and cannot be voted on, so no single vote can
-make later votes meaningless or switch moderation off.
+The ranges are set in code, not by a vote on a setting. A code change can
+widen a range; only one an admin shipped can narrow or remove one.
 
 Known limits:
 
@@ -343,7 +354,10 @@ for passed proposals that haven't been handled, and for the oldest one:
 4. **A security review** by Opus 5.5 reads the whole diff against the
    proposal and rejects anything that could leak a secret, contact a new
    host, add a suspicious dependency, work around the protected core,
-   break Discord's rules, or go beyond what was voted for.
+   break Discord's rules, or do something materially different from what
+   was voted for. If this check or the protected-core check refuses the
+   change, Claude is told why and gets one more try, with the tests and
+   every check run again.
 5. **The result is recorded as a pull request**, whatever happens:
    merged, or closed as `failed` or `no-change` with the reasons. A change
    that contains anything that looks like a secret is thrown away and

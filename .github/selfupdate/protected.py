@@ -1,10 +1,13 @@
 """The protected-core check (see PROTECTED.md). Compares a change with the
 version it would replace and lists every problem; an empty list passes.
 
-    python .github/selfupdate/protected.py BASE_TREE
+    python .github/selfupdate/protected.py BASE_TREE [--admin]
 
 BASE_TREE is a checkout of the version currently deployed. The change is
-the current directory, committed.
+the current directory, committed. --admin: an admin the owner picked
+shipped the proposal, so the values admins may move (setting ranges and
+the channels a vote can't touch) may change. Nothing else is looser for
+them: the files, secrets and the safety floor are the same for everyone.
 """
 
 import json
@@ -21,10 +24,8 @@ PROTECTED_PATHS = (".github/", "PROTECTED.md", "ai.py", "store.py", "health.py",
 # Read out of each tree by importing it, so the values compared are the
 # ones the bot would actually run with.
 SNAPSHOT = r"""
-import json, actions, assistant, automod, conduct, judge, moderator, settings
+import json, actions, automod, conduct, judge, moderator, settings
 print(json.dumps({
-    "instant_tools": sorted(n for n, t in assistant.TIER.items()
-                            if t in (assistant.SELF, assistant.LIGHT)),
     "core_channels": sorted(actions.CORE),
     "fixed_rules": sorted(conduct.FIXED),
     "floor_rule_text": [list(r) for r in conduct.DEFAULT_RULES[3:6]],
@@ -66,14 +67,15 @@ def path_problems(changed):
                    for p in PROTECTED_PATHS)]
 
 
-def value_problems(base, head):
+def value_problems(base, head, admin=False):
     problems = []
-    for name, bounds in base["ranges"].items():
+    # A range may always widen; only an admin's change may narrow or drop one.
+    for name, (low, high) in ({} if admin else base["ranges"]).items():
         if name not in head["ranges"]:
             problems.append(f"removes the setting {name}")
-        elif head["ranges"][name] != bounds:
-            problems.append(f"changes the range of the setting {name} "
-                            f"from {bounds} to {head['ranges'][name]}")
+        elif head["ranges"][name][0] > low or head["ranges"][name][1] < high:
+            problems.append(f"narrows the range of the setting {name} "
+                            f"from {[low, high]} to {head['ranges'][name]}")
     for key, what in (("block_words", "blocked word"),
                       ("block_patterns", "blocked pattern"),
                       ("block_rules", "blocking AutoMod rule")):
@@ -90,11 +92,8 @@ def value_problems(base, head):
         problems.append("raises the score that triggers the self-harm support message")
     if "1564" not in head["support_line"]:
         problems.append("removes Embrace's lifeline from the support message")
-    for tool in head["instant_tools"]:
-        if tool not in base["instant_tools"]:
-            problems.append(f"lets the bot do {tool} without a vote")
     for name in base["core_channels"]:
-        if name not in head["core_channels"]:
+        if name not in head["core_channels"] and not admin:
             problems.append(f"lets a vote rename or delete #{name}")
     for rule in base["fixed_rules"]:
         if rule not in head["fixed_rules"]:
@@ -149,21 +148,22 @@ def snapshot(tree):
     return json.loads(result.stdout)
 
 
-def check(base_tree):
-    """Every problem with the committed change, compared with `base_tree`."""
+def check(base_tree, admin=False):
+    """Every problem with the committed change, compared with `base_tree`.
+    `admin`: an admin shipped the proposal (see the top of this file)."""
     base_rev = _git("rev-parse", "HEAD", cwd=base_tree).strip()
     changed = _git("diff", "--name-only", "--no-renames", base_rev, "HEAD").split()
     diff = _git("diff", "--no-renames", base_rev, "HEAD")
     problems = (path_problems(changed) + access_problems(diff) + admin_problems(diff)
                 + github_problems(diff))
     try:
-        problems += value_problems(snapshot(base_tree), snapshot("."))
+        problems += value_problems(snapshot(base_tree), snapshot("."), admin)
     except RuntimeError as e:
         problems.append(f"the protected values could not be read from the change: {e}")
     return problems
 
 
 if __name__ == "__main__":
-    found = check(sys.argv[1])
+    found = check(sys.argv[1], admin="--admin" in sys.argv[2:])
     print("\n".join(found) or "The protected core is untouched.")
     sys.exit(1 if found else 0)
