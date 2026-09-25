@@ -117,6 +117,11 @@ class Checks(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Nobody uses it", details)
 
 
+class System(unittest.TestCase):
+    def test_the_bot_is_told_never_to_use_an_em_dash(self):
+        self.assertIn("Never use an em dash", assistant.SYSTEM)
+
+
 class Tiers(unittest.TestCase):
     def test_every_tool_has_a_tier_and_a_handler(self):
         names = [tool["name"] for tool in assistant.TOOLS]

@@ -116,14 +116,14 @@ first one it's invited to becomes its home, and it leaves any other.
 ## Talking to the bot
 
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
-answers in the language they use. It answers only messages that tag it or
-reply to it, so members can also talk to each other there. It is the only
-channel where the bot reads ordinary messages. If such a message has an
-image attached, the bot can see it too (up to 3 images, 5 MB each) and use
-what's in it, for example drafting an emoji or the server's icon straight
-from the attachment. The model understands the request, and code
-decides what is allowed: every tool is in one of four tiers, fixed in
-`assistant.py`.
+answers in the language they use, never using an em dash. It answers only
+messages that tag it or reply to it, so members can also talk to each
+other there. It is the only channel where the bot reads ordinary
+messages. If such a message has an image attached, the bot can see it too
+(up to 3 images, 5 MB each) and use what's in it, for example drafting an
+emoji or the server's icon straight from the attachment. The model
+understands the request, and code decides what is allowed: every tool is
+in one of four tiers, fixed in `assistant.py`.
 
 | Tier | Rule | What |
 | --- | --- | --- |
