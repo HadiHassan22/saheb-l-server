@@ -7,7 +7,9 @@ because the server may have changed during the vote. Things are named by
 their current name when drafting and remembered by id after that.
 
 Limits that hold whatever a vote says:
-- the channels the bot depends on can't be renamed or deleted;
+- the channels the bot depends on can't be renamed, deleted or purged, so the
+  moderation and admin logs, and the record of every admin action, can't be
+  wiped by a vote or an admin acting alone;
 - roles are cosmetic: they are created with no permissions, and guard.py
   takes away any that appear later;
 - rules 4 to 6 and the original rules can't be removed (conduct.py), and
@@ -31,8 +33,9 @@ import store
 
 log = logging.getLogger("actions")
 
-CREATE, RENAME, DELETE, TOPIC, SLOWMODE = (
-    "create_channel", "rename_channel", "delete_channel", "set_topic", "set_slowmode")
+CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE = (
+    "create_channel", "rename_channel", "delete_channel", "set_topic", "set_slowmode",
+    "purge_channel")
 CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE = (
     "create_category", "rename_category", "delete_category")
 ROLE_CREATE, ROLE_EDIT, ROLE_DELETE = "create_role", "edit_role", "delete_role"
@@ -43,7 +46,7 @@ WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 
-CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE,
+CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE,
                  CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE)
 ROLE_KINDS = (ROLE_CREATE, ROLE_EDIT, ROLE_DELETE)
 EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
@@ -198,8 +201,9 @@ def _check_channel(guild, action):
         return "There's no channel by that name."
     action["channel_id"] = target.id
     action["channel"] = target.name
-    if target.id in core_ids(guild) and kind in (RENAME, DELETE):
-        return f"#{target.name} is one the bot depends on, so it can't be renamed or deleted."
+    if target.id in core_ids(guild) and kind in (RENAME, DELETE, PURGE):
+        return (f"#{target.name} is one the bot depends on, so it can't be renamed, "
+                "deleted or purged.")
     if kind == RENAME:
         voice = isinstance(target, discord.VoiceChannel)
         new = str(action.get("name") or "").strip()[:100] if voice else text_name(action.get("name"))
@@ -208,6 +212,9 @@ def _check_channel(guild, action):
         action["name"] = new
     if kind in (TOPIC, SLOWMODE) and not isinstance(target, discord.TextChannel):
         return "Only text channels have a topic and slowmode."
+    if kind == PURGE:
+        return (None if isinstance(target, discord.TextChannel)
+                else "Only text channels can be purged.")
     return _check_text_settings(action)
 
 
@@ -380,6 +387,8 @@ def describe(action):
                         f"Set the topic of **{a['channel']}** to: {a['topic']}"),
         SLOWMODE: lambda: (f"Slowmode of {a['slowmode']}s in {a['channel']}",
                            f"Set slowmode in **{a['channel']}** to {a['slowmode']} seconds."),
+        PURGE: lambda: (f"Clear {a['channel']}'s history", f"Delete every message in "
+                        f"**{a['channel']}**. The channel stays; its messages can't be restored."),
         CATEGORY_CREATE: lambda: (f"Create the category {a['name']}",
                                   f"Create a category called **{a['name']}**."),
         CATEGORY_RENAME: lambda: (f"Rename the category {a['category']}",
@@ -454,7 +463,7 @@ async def carry_out(guild, action):
             return f"Done: the category is now {a['name']}."
         await category.delete(reason=REASON)
         return f"Done: the category {a['category']} is deleted."
-    if kind in (RENAME, DELETE, TOPIC, SLOWMODE):
+    if kind in (RENAME, DELETE, TOPIC, SLOWMODE, PURGE):
         return await _carry_out_channel(guild, a)
     if kind in ROLE_KINDS:
         return await _carry_out_role(guild, a)
@@ -504,8 +513,11 @@ async def _carry_out_channel(guild, a):
     if kind == TOPIC:
         await target.edit(topic=a["topic"], reason=REASON)
         return f"Done: {target.mention} has its new topic."
-    await target.edit(slowmode_delay=a["slowmode"], reason=REASON)
-    return f"Done: slowmode in {target.mention} is {a['slowmode']} seconds."
+    if kind == SLOWMODE:
+        await target.edit(slowmode_delay=a["slowmode"], reason=REASON)
+        return f"Done: slowmode in {target.mention} is {a['slowmode']} seconds."
+    deleted = await target.purge(limit=None, reason=REASON)
+    return f"Done: {len(deleted)} messages deleted from {target.mention}."
 
 
 async def _carry_out_role(guild, a):

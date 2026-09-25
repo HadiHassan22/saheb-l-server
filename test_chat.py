@@ -119,10 +119,28 @@ class Checks(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("can't be restored", details)
         self.assertIn("Nobody uses it", details)
 
+    def test_a_channel_the_bot_depends_on_cant_be_purged(self):
+        self.assertIn("depends on", self.check(kind=actions.PURGE, channel="welcome")[0])
+        problem, action = self.check(kind=actions.PURGE, channel="cars")
+        self.assertIsNone(problem)
+        title, details = actions.describe(action)
+        self.assertEqual(title, "Clear cars's history")
+        self.assertIn("can't be restored", details)
+
+    def test_only_text_channels_can_be_purged(self):
+        self.assertIn("Only text", self.check(kind=actions.PURGE, channel="Gaming 1")[0])
+
 
 class System(unittest.TestCase):
     def test_the_bot_is_told_never_to_use_an_em_dash(self):
         self.assertIn("Never use an em dash", assistant.SYSTEM)
+
+    def test_only_irreversible_channel_changes_need_confirming(self):
+        for kind in (actions.DELETE, actions.CATEGORY_DELETE, actions.PURGE):
+            self.assertTrue(assistant.needs_confirming(
+                proposals.ACTION, {"kind": kind}))
+        self.assertFalse(assistant.needs_confirming(
+            proposals.ACTION, {"kind": actions.TOPIC}))
 
 
 class Tiers(unittest.TestCase):
@@ -548,6 +566,13 @@ class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Proposal 3", logged.call_args.args[1])
         self.guild.create_text_channel.assert_awaited_once()
         self.assertIn("<#50> is open", said)
+
+    async def test_purging_deletes_every_message_and_leaves_the_channel(self):
+        cars = self.guild.channels[3]
+        cars.purge = mock.AsyncMock(return_value=[object(), object()])
+        said = await actions.carry_out(self.guild, {"kind": actions.PURGE, "channel": "cars"})
+        cars.purge.assert_awaited_once_with(limit=None, reason=actions.REASON)
+        self.assertIn("2 messages deleted", said)
 
     async def test_a_deleted_planned_channel_is_not_rebuilt(self):
         store.save("layout", {"guild_id": 99, "channels": {"cars": 2}, "messages": {}})

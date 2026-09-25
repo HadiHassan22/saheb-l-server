@@ -143,7 +143,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 | Area | Changes |
 | --- | --- |
-| Channels and categories | create, rename, delete; a channel's topic and slowmode |
+| Channels and categories | create, rename, delete; a channel's topic and slowmode; clear a channel's message history |
 | Roles | create (with a color, and whether members can join it), rename, recolor, delete: always cosmetic |
 | Emojis | add (from an image attached in `#ask-saheb`), remove |
 | The server | rename it; set its icon |
@@ -160,10 +160,10 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   `/admin add`, see `admins.py`; the owner counts as one), what they ask
   for is done at once: posted in `#proposals` as already passed and
   carried out like a passed vote, and the bot says what came of it.
-  Deleting a channel or category is the exception: it comes back as a
-  draft with a **Ship it** button to confirm, since the history is lost
-  for good. A code change still goes through the self-update workflow's
-  checks. `/admin withdraw` takes down any open
+  Deleting a channel or category, or clearing a channel's history, is the
+  exception: it comes back as a draft with a **Ship it** button to
+  confirm, since the history is lost for good. A code change still goes
+  through the self-update workflow's checks. `/admin withdraw` takes down any open
   proposal, `/admin chat-limit` switches the chat limit, and `/admin
   github` shows admins, and only them, where the code is. Every admin
   action is posted in `#server-log`. What admins can do can grow by code
