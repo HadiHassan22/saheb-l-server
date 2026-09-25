@@ -4,8 +4,9 @@ The bot is made for a brand-new server and needs Administrator. On its
 first start it builds the layout below, adopting Discord's default
 #general and General voice channel and removing the empty default
 categories. On every start after that it recreates anything missing and
-brings the AutoMod rules and the #welcome and #rules posts up to date.
-Channels are remembered by id, so renaming one changes nothing.
+brings the AutoMod rules, the #welcome post, and the rules written into
+`RULES_CHANNEL_ID` up to date. Channels the layout plans are remembered by
+id, so renaming one changes nothing.
 """
 
 import logging
@@ -26,6 +27,8 @@ HIDDEN = "hidden"                # the bot alone
 VOICE = "voice"
 AFK = "afk"                      # the voice channel idle members are moved to
 
+RULES_CHANNEL_ID = 1552045519013154848  # the rules are written here, not into a planned channel
+
 
 def room(name, kind=OPEN, topic="", slowmode=0):
     """One channel in the plan. `slowmode` is seconds between a member's
@@ -36,7 +39,6 @@ def room(name, kind=OPEN, topic="", slowmode=0):
 PLAN = [
     ("Start here", [
         room("welcome", READ_ONLY, "How this server works."),
-        room("rules", READ_ONLY, "The rules the moderator enforces. Change them by vote."),
         room("roles", READ_ONLY,
              "Pick a name color here or with /color. Colors are only for looks: "
              "they give no powers."),
@@ -217,17 +219,19 @@ async def server_log(guild, text):
 
 
 async def post_texts(guild):
-    """Post #welcome and #rules, or edit them if the text has changed (for
-    example after a vote changes a setting)."""
+    """Post #welcome and the rules, or edit them if the text has changed (for
+    example after a vote changes a setting). The rules go into
+    `RULES_CHANNEL_ID`, not a channel the layout plans and builds."""
     owner = guild.owner.mention if guild.owner else "the server owner"
     mod_log = channel(guild, "mod-log")
     saved = _saved()
     ask = channel(guild, "ask-saheb")
     welcome = conduct.welcome_text(owner, mod_log.mention if mod_log else "#mod-log",
                                    ask.mention if ask else "#ask-saheb")
+    targets = {"welcome": channel(guild, "welcome"), "rules": guild.get_channel(RULES_CHANNEL_ID)}
     # Embeds rather than plain messages: a description holds 4096 characters.
     for name, (title, text) in (("welcome", welcome), ("rules", conduct.rules_text())):
-        target = channel(guild, name)
+        target = targets[name]
         if target is None:
             continue
         embed = discord.Embed(title=title, description=text, colour=discord.Colour.green())

@@ -93,7 +93,7 @@ this, adopting Discord's default `#general` and General voice channel:
 
 | Category | Channels |
 | --- | --- |
-| Start here | `#welcome`, `#rules`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
+| Start here | `#welcome`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
 | Governance | `#ask-saheb` (talk to the bot), `#proposals` (the bot posts; members discuss in each proposal's thread) |
 | Hangout | `#general`, `#introductions`, `#memes`, `#media`, `#off-topic` |
 | Lebanon | `#lebanon-news`, `#politics-and-religion` (30-second slowmode), `#diaspora` |
@@ -109,7 +109,8 @@ roles and puts the color picker in `#roles`.
 The layout is in `layout.py`. Once the server is running, channels change
 by vote (see below): a channel deleted by vote stays deleted.
 On every start it recreates anything missing and brings its AutoMod rules
-and the `#welcome` and `#rules` posts up to date. It runs one server: the
+and the `#welcome` post up to date. The rules are written into a fixed
+channel rather than one the bot builds. It runs one server: the
 first one it's invited to becomes its home, and it leaves any other.
 
 ## Talking to the bot

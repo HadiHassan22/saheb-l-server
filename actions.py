@@ -55,7 +55,7 @@ KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
-CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-saheb",
+CORE = {"welcome", "roles", "mod-log", "server-log", "proposals", "ask-saheb",
         "automod-alerts", "AFK"}
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
@@ -73,7 +73,8 @@ def text_name(name):
 
 
 def core_ids(guild):
-    return {found.id for name in CORE if (found := layout.channel(guild, name))}
+    return {found.id for name in CORE if (found := layout.channel(guild, name))} | {
+        layout.RULES_CHANNEL_ID}
 
 
 def member_id(text):
