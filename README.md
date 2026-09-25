@@ -171,8 +171,10 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   exception: it comes back as a draft with a **Ship it** button to
   confirm, since the history is lost for good. A code change still goes
   through the self-update workflow's checks. `/admin withdraw` takes down any open
-  proposal, `/admin chat-limit` switches the chat limit, and `/admin
-  github` shows admins, and only them, where the code is. Every admin
+  proposal, `/admin retry` has a code change that failed, changed nothing
+  or was rolled back tried again, `/admin chat-limit` switches the chat
+  limit, and `/admin github` shows admins, and only them, where the code
+  is. Every admin
   action is posted in `#server-log`. What admins can do can grow by code
   change; who they are can't: only the owner and the admins change that.
 - **Votes about a member** (kick, ban) need the member @mentioned and a
@@ -408,7 +410,10 @@ each time the bot starts the workflow (or couldn't), runs it started, and
 runs that fail. Only the admins and the owner can read it: the bot checks
 that before every post.
 
-Each proposal is attempted once. To try again, propose it again.
+Each proposal is tried once. If that try failed, changed nothing or was
+rolled back, an admin can have it tried again with `/admin retry`: the new
+try gets its own branch (`proposal-N-try-2`), starts from what the last
+one changed, and is told why it wasn't kept.
 
 ## Files
 

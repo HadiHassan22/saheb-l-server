@@ -6,8 +6,10 @@ from telling whether a new version came up, and so from rolling it back.
   Railway waits for it before sending traffic to a new version, and the
   self-update workflow reads `commit` from it to confirm what is live.
 - GET /api/passed lists the proposals that passed, or that an admin
-  shipped without a vote, and may need a code change. The self-update workflow reads it. Everything in it is already
-  public in #proposals.
+  shipped without a vote, and may need a code change, with which try at
+  it each is on (an admin can ask for another, updates.py). The
+  self-update workflow reads it. Everything in it is already public in
+  #proposals.
 
 Railway sets PORT; without it (running locally) nothing is served.
 """
@@ -30,7 +32,8 @@ def passed_proposals():
              if p["kind"] == proposals.GENERAL and p["status"] == proposals.PASSED]
     found.sort(key=lambda p: p["no"])
     return [{"no": p["no"], "title": p["title"], "details": p["details"],
-             "shipped": bool(p.get("shipped_by"))} for p in found]
+             "shipped": bool(p.get("shipped_by")), "attempt": proposals.attempt(p)}
+            for p in found]
 
 
 async def serve(client):

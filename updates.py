@@ -12,6 +12,12 @@ outcome as a pull request:
 - a merged `revert-proposal-N`: the new version didn't come up, so it was
   rolled back.
 
+Each proposal is tried once. After a try that wasn't kept (failed, no
+change, rolled back), an admin can ask for another with /admin retry: it
+runs on its own branch, `proposal-N-try-2` and so on, and the workflow
+shows it what the last try changed and why it wasn't kept. Pull requests
+from earlier tries are then ignored.
+
 The bot reads these from GitHub every five minutes (workflow.py, with the
 owner's token if there is one, else the public API). When the commit it is
 running is a proposal's, it says that proposal is live.
@@ -57,12 +63,20 @@ WRITING, NO_CHANGE, FAILED, MERGED, LIVE, ROLLED_BACK = (
 # A stage is only ever announced once, and never goes backwards.
 ORDER = [WRITING, NO_CHANGE, FAILED, MERGED, LIVE, ROLLED_BACK]
 
-BRANCH = re.compile(r"^(revert-)?proposal-(\d+)$")
+BRANCH = re.compile(r"^(revert-)?proposal-(\d+)(?:-try-(\d+))?$")
+# What an admin can ask to try again: a try that is over and wasn't kept.
+RETRYABLE = (NO_CHANGE, FAILED, ROLLED_BACK)
 
 
 def proposal_of(pr):
     match = BRANCH.match(pr["head"]["ref"])
     return int(match[2]) if match else None
+
+
+def attempt_of(pr):
+    """Which try at its proposal a pull request is, from 1."""
+    match = BRANCH.match(pr["head"]["ref"])
+    return int(match[3] or 1) if match else None
 
 
 def stage_of(pr):
@@ -237,7 +251,8 @@ async def follow(client):
             if no is None or stage is None:
                 continue
             p = proposals.get(no)
-            if not p or p["status"] != proposals.PASSED:
+            if (not p or p["status"] != proposals.PASSED
+                    or attempt_of(pr) != proposals.attempt(p)):
                 continue
             if advance(no, stage, pr):
                 await _say(client, no, message(no, stage, summary_of(pr)))
@@ -276,6 +291,49 @@ async def github(interaction: discord.Interaction, proposal: int = None):
             else f"Proposal {proposal} has no code change yet." if proposal is not None
             else f"The code: <{link()}>")
     await interaction.response.send_message(text, ephemeral=True)
+
+
+def retry(no):
+    """Have the workflow try proposal `no`'s code change again, and return
+    the proposal. Raises proposals.Refused unless its last try is over and
+    wasn't kept; checking that the caller is an admin is the caller's job."""
+    saved = _saved()
+    if saved["stages"].get(str(no)) not in RETRYABLE:
+        raise proposals.Refused("Only a proposal whose code change failed, changed nothing "
+                                "or was rolled back can be tried again.")
+    p = proposals.retry(no)
+    # Its stages start over, so the new try is announced like the first.
+    del saved["stages"][str(no)]
+    saved.get("links", {}).pop(str(no), None)
+    store.save("updates", saved)
+    return p
+
+
+@admins.group.command(name="retry",
+                      description="Admins: try a proposal's code change again")
+@app_commands.describe(proposal="The proposal's number")
+async def retry_command(interaction: discord.Interaction, proposal: int):
+    if not admins.allowed(interaction.user.id, interaction.guild):
+        return await interaction.response.send_message(
+            "Only an admin can have a code change tried again.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        p = retry(proposal)
+    except proposals.Refused as e:
+        return await interaction.followup.send(str(e), ephemeral=True)
+    try:
+        await layout.server_log(
+            interaction.guild, f"<@{interaction.user.id}> asked for proposal {p['no']} "
+                               f"({p['title']}) to be tried again, as an admin.")
+    except discord.HTTPException as e:
+        log.error(f"proposal {p['no']}'s retry wasn't logged: {e!r}")
+    await _say(interaction.client, p["no"],
+               f"An admin asked for proposal {p['no']}'s code change to be tried again, "
+               "starting from what went wrong last time. Progress will be posted here.")
+    start_soon(interaction.guild, p["no"])
+    await interaction.followup.send(
+        f"Proposal {p['no']} will be tried again (try {proposals.attempt(p)}).",
+        ephemeral=True)
 
 
 def setup(client):

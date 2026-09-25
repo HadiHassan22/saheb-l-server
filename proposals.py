@@ -137,6 +137,26 @@ def withdraw(no, admin_id, reason, now):
     return proposal
 
 
+def attempt(proposal):
+    """Which try at its code change a general proposal is on, from 1."""
+    return proposal.get("attempt", 1)
+
+
+def retry(no):
+    """Mark passed general proposal `no` for another try at its code change,
+    on an admin's word (updates.py), and return it. Checking that the last
+    try is over, and that the caller is an admin, is the caller's job."""
+    data = _load()
+    proposal = data["proposals"].get(str(no))
+    if proposal is None:
+        raise Refused("That proposal doesn't exist.")
+    if proposal["kind"] != GENERAL or proposal["status"] != PASSED:
+        raise Refused("Only a passed proposal for a code change can be tried again.")
+    proposal["attempt"] = attempt(proposal) + 1
+    _save(data)
+    return proposal
+
+
 def quorum_for(quorum, members):
     """The quorum for a server of `members` people: the setting, or half
     the members rounded up if that's fewer, never below the setting's

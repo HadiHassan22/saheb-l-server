@@ -429,7 +429,8 @@ class Passed(WithTempData):
             proposals.close(no, NOW + proposals.DAY)
         self.assertEqual([p["no"] for p in health.passed_proposals()], [1, 3])
         self.assertEqual(health.passed_proposals()[0],
-                         {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False})
+                         {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False,
+                          "attempt": 1})
 
     def test_waiting_is_what_passed_and_has_no_pull_request_yet(self):
         for n in range(3):
@@ -444,7 +445,97 @@ class Passed(WithTempData):
                            7, NOW)
         self.assertEqual(health.passed_proposals(),
                          [{"no": 1, "title": "Dark mode", "details": "Add it.",
-                           "shipped": True}])
+                           "shipped": True, "attempt": 1}])
+
+
+_spec = importlib.util.spec_from_file_location(
+    "selfupdate_run", HERE / ".github" / "selfupdate" / "run.py")
+selfupdate_run = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(selfupdate_run)
+
+
+class Retry(WithTempData):
+    def setUp(self):
+        super().setUp()
+        self.no = proposals.pass_now(
+            code_changes.KIND.open(7, "Onboarding", "Edit it.", NOW)["no"], 7, NOW)["no"]
+
+    def test_only_a_try_that_is_over_and_was_not_kept_can_be_retried(self):
+        with self.assertRaises(proposals.Refused):
+            updates.retry(self.no)  # not tried yet
+        for stage in (updates.WRITING, updates.MERGED, updates.LIVE):
+            updates.advance(self.no, stage)
+            with self.assertRaises(proposals.Refused):
+                updates.retry(self.no)
+        other = setting_changes.KIND.open(9, "quorum", 8, "", NOW)["no"]
+        updates.advance(other, updates.FAILED)
+        with self.assertRaises(proposals.Refused):
+            updates.retry(other)  # not a code change
+
+    def test_a_retry_is_the_next_try_and_starts_its_stages_over(self):
+        updates.advance(self.no, updates.FAILED, pr("proposal-1", labels=["failed"]))
+        self.assertEqual(updates.waiting(), [])
+        self.assertEqual(proposals.attempt(updates.retry(self.no)), 2)
+        self.assertEqual(health.passed_proposals()[0]["attempt"], 2)
+        self.assertEqual(updates.waiting(), [self.no])
+        self.assertIsNone(updates.link(self.no))
+        self.assertTrue(updates.advance(self.no, updates.WRITING))
+        updates.advance(self.no, updates.ROLLED_BACK)
+        self.assertEqual(proposals.attempt(updates.retry(self.no)), 3)
+
+    def test_the_workflow_and_the_bot_name_each_try_the_same_way(self):
+        for attempt in (1, 2, 3):
+            branch = selfupdate_run.branch_of({"no": 24, "attempt": attempt})
+            for ref in (branch, f"revert-{branch}"):
+                self.assertEqual(updates.proposal_of(pr(ref)), 24)
+                self.assertEqual(updates.attempt_of(pr(ref)), attempt)
+        self.assertEqual(selfupdate_run.branch_of({"no": 24}), "proposal-24")
+        self.assertIsNone(updates.attempt_of(pr("dependabot/pip")))
+
+    def test_a_retry_is_shown_the_last_try_and_why_it_was_not_kept(self):
+        self.assertEqual(selfupdate_run.earlier_try({"no": 24, "attempt": 1}), "")
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            if args[:2] == ("pr", "list"):
+                return '[{"number": 7, "body": "The tests fail: TypeError", "mergedAt": null}]'
+            return "+++ b/actions.py\n+options = []"
+
+        with mock.patch.object(selfupdate_run, "gh", gh):
+            said = selfupdate_run.earlier_try({"no": 24, "attempt": 2})
+            prompt = selfupdate_run.implement_prompt(
+                {"no": 24, "title": "Onboarding", "details": "Edit it.", "attempt": 2})
+        self.assertIn("proposal-24", calls[0])
+        self.assertIn("TypeError", said)
+        self.assertIn("+options = []", said)
+        self.assertIn("try 2", said)
+        self.assertIn(said, prompt)
+
+    async def test_an_admin_asks_for_a_retry_and_it_is_logged_and_started(self):
+        updates.advance(self.no, updates.FAILED)
+        sent = []
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(id=1), guild=types.SimpleNamespace(id=99, owner_id=1),
+            client=types.SimpleNamespace(),
+            response=types.SimpleNamespace(
+                defer=mock.AsyncMock(),
+                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))),
+            followup=types.SimpleNamespace(
+                send=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+        with mock.patch.object(layout, "home_id", lambda: 99), \
+                mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged, \
+                mock.patch.object(updates, "_say", mock.AsyncMock()) as said, \
+                mock.patch.object(updates, "start_soon") as started:
+            interaction.user.id = 8  # not an admin
+            await updates.retry_command.callback(interaction, self.no)
+            self.assertIn("Only an admin", sent[-1])
+            interaction.user.id = 1  # the owner
+            await updates.retry_command.callback(interaction, self.no)
+        self.assertIn("try 2", sent[-1])
+        self.assertIn("tried again", logged.call_args.args[1])
+        said.assert_awaited_once()
+        started.assert_called_once_with(interaction.guild, self.no)
 
 
 if __name__ == "__main__":
