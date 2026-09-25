@@ -49,14 +49,31 @@ def role(id, name, position=1, permissions=None, managed=False):
     return r
 
 
-def guild(roles=()):
+def guild(roles=(), channels=()):
     bot_role = role(99, "Saheb l Server", position=50, managed=True)
-    g = types.SimpleNamespace(id=5, owner_id=OWNER, roles=[*roles, bot_role], channels=[],
+    g = types.SimpleNamespace(id=5, owner_id=OWNER, roles=[*roles, bot_role], channels=list(channels),
                               categories=[], emojis=[], emoji_limit=50)
     g.me = types.SimpleNamespace(id=BOT, top_role=bot_role)
     g.get_role = lambda rid: next((r for r in g.roles if r.id == rid), None)
-    g.get_channel = lambda cid: None
+    g.get_channel = lambda cid: next((c for c in g.channels if c.id == cid), None)
     return g
+
+
+def channel(id, name):
+    return types.SimpleNamespace(id=id, name=name)
+
+
+def onboarding_prompt(title):
+    return types.SimpleNamespace(title=title)
+
+
+def with_onboarding(g, prompts):
+    """Attach a fake `guild.onboarding()` returning `prompts` (titles), and
+    record edits on the returned mock's `edit`."""
+    fetched = types.SimpleNamespace(prompts=[onboarding_prompt(t) for t in prompts],
+                                    edit=mock.AsyncMock())
+    g.onboarding = mock.AsyncMock(return_value=fetched)
+    return fetched
 
 
 class Roles(WithTempData):
@@ -100,6 +117,79 @@ class Rules(WithTempData):
             await actions.carry_out(g, {"kind": actions.RULE_REMOVE, "number": 9})
         self.assertEqual(len(conduct.rules()), len(conduct.DEFAULT_RULES))
         self.assertIn("since removed", conduct.title(9))
+
+
+class Onboarding(WithTempData):
+    def setUp(self):
+        super().setUp()
+        store.save("roles", {"40": {"joinable": True}})
+
+    def option(self, **kwargs):
+        return {"title": "Gaming", "channels": ["gaming"], **kwargs}
+
+    async def test_an_option_needs_a_channel_or_a_role(self):
+        g = guild(channels=[channel(1, "gaming")])
+        with_onboarding(g, [])
+        problem = await actions.check(g, {"kind": actions.ONBOARDING_ADD, "title": "Interests",
+                                          "options": [{"title": "Gaming"}]})
+        self.assertIn("needs at least one channel or role", problem)
+
+    async def test_only_a_channel_that_exists_or_a_role_made_by_vote_can_be_offered(self):
+        g = guild(channels=[channel(1, "gaming")], roles=[role(41, "Quiet")])
+        with_onboarding(g, [])
+        self.assertIn("no channel", await actions.check(
+            g, {"kind": actions.ONBOARDING_ADD, "title": "Interests",
+                "options": [self.option(channels=["nope"])]}))
+        self.assertIn("made by vote", await actions.check(
+            g, {"kind": actions.ONBOARDING_ADD, "title": "Interests",
+                "options": [self.option(channels=[], roles=["Quiet"])]}))
+
+    async def test_onboarding_must_be_turned_on(self):
+        g = guild(channels=[channel(1, "gaming")])
+        g.onboarding = mock.AsyncMock(side_effect=discord.HTTPException(mock.Mock(status=400), "x"))
+        problem = await actions.check(
+            g, {"kind": actions.ONBOARDING_ADD, "title": "Interests", "options": [self.option()]})
+        self.assertIn("Onboarding isn't turned on", problem)
+
+    async def test_adding_a_prompt_keeps_the_others_and_saves_the_new_one(self):
+        g = guild(channels=[channel(1, "gaming")])
+        fetched = with_onboarding(g, ["Pronouns"])
+        action = {"kind": actions.ONBOARDING_ADD, "title": "Interests",
+                  "options": [self.option()]}
+        self.assertIsNone(await actions.check(g, action))
+        await actions.carry_out(g, action)
+        saved = fetched.edit.call_args.kwargs["prompts"]
+        self.assertEqual(len(saved), 2)
+        self.assertEqual(saved[0].title, "Pronouns")
+        self.assertEqual(saved[1].title, "Interests")
+        self.assertEqual(saved[1].options[0].title, "Gaming")
+        self.assertEqual([c.id for c in saved[1].options[0].channels], [1])
+
+    async def test_editing_a_prompt_replaces_only_that_one(self):
+        g = guild(channels=[channel(1, "gaming")])
+        fetched = with_onboarding(g, ["Pronouns", "Interests"])
+        action = {"kind": actions.ONBOARDING_EDIT, "number": 2, "title": "Hobbies",
+                  "options": [self.option()]}
+        self.assertIsNone(await actions.check(g, action))
+        self.assertEqual(action["old_title"], "Interests")
+        await actions.carry_out(g, action)
+        saved = fetched.edit.call_args.kwargs["prompts"]
+        self.assertEqual([p.title for p in saved], ["Pronouns", "Hobbies"])
+
+    async def test_removing_a_prompt_by_a_bad_number_is_refused(self):
+        g = guild(channels=[channel(1, "gaming")])
+        with_onboarding(g, ["Pronouns"])
+        problem = await actions.check(g, {"kind": actions.ONBOARDING_REMOVE, "number": 5})
+        self.assertIn("There are 1 onboarding prompts", problem)
+
+    async def test_removing_a_prompt_leaves_the_rest(self):
+        g = guild(channels=[channel(1, "gaming")])
+        fetched = with_onboarding(g, ["Pronouns", "Interests"])
+        action = {"kind": actions.ONBOARDING_REMOVE, "number": 1}
+        self.assertIsNone(await actions.check(g, action))
+        await actions.carry_out(g, action)
+        saved = fetched.edit.call_args.kwargs["prompts"]
+        self.assertEqual([p.title for p in saved], ["Interests"])
 
 
 class WatchWords(WithTempData):

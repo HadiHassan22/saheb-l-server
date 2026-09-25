@@ -43,6 +43,8 @@ EMOJI_ADD, EMOJI_REMOVE = "add_emoji", "remove_emoji"
 SERVER_NAME, SERVER_ICON = "rename_server", "set_server_icon"
 RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
+ONBOARDING_ADD, ONBOARDING_EDIT, ONBOARDING_REMOVE = (
+    "add_onboarding_prompt", "edit_onboarding_prompt", "remove_onboarding_prompt")
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 
@@ -53,9 +55,10 @@ EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
 SERVER_KINDS = (SERVER_NAME, SERVER_ICON)
 RULE_KINDS = (RULE_EDIT, RULE_ADD, RULE_REMOVE)
 WATCH_KINDS = (WATCH_ADD, WATCH_REMOVE)
+ONBOARDING_KINDS = (ONBOARDING_ADD, ONBOARDING_EDIT, ONBOARDING_REMOVE)
 PEOPLE_KINDS = (KICK, BAN, UNBAN)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
-         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS)
+         + WATCH_KINDS + ONBOARDING_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
@@ -64,6 +67,7 @@ CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
 MAX_CHANNELS, MAX_ROLES, MAX_RULES = 450, 100, 20
+MAX_ONBOARDING_PROMPTS, MAX_ONBOARDING_OPTIONS = 20, 20
 MAX_EMOJI_BYTES, MAX_ICON_BYTES = 256 * 1024, 4 * 1024 * 1024
 REASON = "Ordered by a community vote"
 
@@ -147,6 +151,8 @@ async def check(guild, action):
         return _check_rule(action)
     if kind in WATCH_KINDS:
         return _check_watch(action)
+    if kind in ONBOARDING_KINDS:
+        return await _check_onboarding(guild, action)
     if kind == EVENT_CANCEL:
         return _check_event(guild, action)
     return await _check_member(guild, action)
@@ -334,6 +340,72 @@ def _check_watch(action):
     return None
 
 
+def _onboarding_option(guild, raw):
+    """A normalised option from `raw`, or (None, why not)."""
+    title = str((raw or {}).get("title") or "").strip()[:50]
+    if not title:
+        return None, "Every onboarding option needs a title."
+    description = str(raw.get("description") or "").strip()[:100]
+    channel_ids, channel_names = [], []
+    for asked in raw.get("channels") or []:
+        name = str(asked).strip().lstrip("#")
+        found = discord.utils.get(guild.channels, name=name) or discord.utils.get(
+            guild.channels, name=text_name(name))
+        if found is None or isinstance(found, discord.CategoryChannel):
+            return None, f"There's no channel called {asked}."
+        channel_ids.append(found.id)
+        channel_names.append(found.name)
+    role_ids, role_names = [], []
+    voted = voted_roles()
+    for asked in raw.get("roles") or []:
+        name = str(asked).strip().lstrip("@")
+        found = discord.utils.get(guild.roles, name=name)
+        if found is None or found.id not in voted:
+            return None, f"Only roles made by vote can be offered; {asked} isn't one."
+        role_ids.append(found.id)
+        role_names.append(found.name)
+    if not channel_ids and not role_ids:
+        return None, f"The option {title} needs at least one channel or role."
+    return {"title": title, "description": description,
+            "channel_ids": channel_ids, "channels": channel_names,
+            "role_ids": role_ids, "roles": role_names}, None
+
+
+async def _check_onboarding(guild, action):
+    kind = action["kind"]
+    try:
+        prompts = (await guild.onboarding()).prompts
+    except discord.HTTPException:
+        return ("Onboarding isn't turned on for this server yet (Server Settings, Safety "
+                "Setup, Onboarding).")
+    number = action.get("number")
+    if kind in (ONBOARDING_EDIT, ONBOARDING_REMOVE):
+        if not isinstance(number, int) or not 1 <= number <= len(prompts):
+            return f"There are {len(prompts)} onboarding prompts; pick one of those numbers."
+        action["number"], action["old_title"] = number, prompts[number - 1].title
+    if kind in (ONBOARDING_ADD, ONBOARDING_EDIT):
+        title = str(action.get("title") or "").strip()[:150]
+        if not title:
+            return "Give the onboarding prompt a question."
+        raw_options = action.get("options") or []
+        if not raw_options:
+            return "Give the onboarding prompt at least one option."
+        if len(raw_options) > MAX_ONBOARDING_OPTIONS:
+            return f"A prompt can have at most {MAX_ONBOARDING_OPTIONS} options."
+        if kind == ONBOARDING_ADD and len(prompts) >= MAX_ONBOARDING_PROMPTS:
+            return f"There can be at most {MAX_ONBOARDING_PROMPTS} onboarding prompts."
+        options = []
+        for raw in raw_options:
+            option, problem = _onboarding_option(guild, raw)
+            if problem:
+                return problem
+            options.append(option)
+        action["title"], action["options"] = title, options
+        action["single_select"] = bool(action.get("single_select", True))
+        action["required"] = bool(action.get("required", True))
+    return None
+
+
 def _check_event(guild, action):
     event = (guild.get_scheduled_event(action.get("event_id") or 0)
              or discord.utils.get(guild.scheduled_events, name=action.get("event")))
@@ -370,6 +442,12 @@ async def _check_member(guild, action):
 
 
 # ---------- describing ----------
+
+def _option_summary(option):
+    targets = [f"#{c}" for c in option["channels"]] + [f"@{r}" for r in option["roles"]]
+    text = f"**{option['title']}** ({', '.join(targets)})"
+    return text + f": {option['description']}" if option["description"] else text
+
 
 def describe(action):
     """(title, details) of the proposal for `action`."""
@@ -419,6 +497,17 @@ def describe(action):
                             + ", ".join(f"`{w}`" for w in a["words"])),
         WATCH_REMOVE: lambda: ("Watch fewer words", "Stop AutoMod passing these to the "
                                "moderator: " + ", ".join(f"`{w}`" for w in a["words"])),
+        ONBOARDING_ADD: lambda: (f"New onboarding prompt: {a['title']}",
+                                 f"Add the onboarding prompt **{a['title']}**, with the "
+                                 "options: " + "; ".join(_option_summary(o) for o in a["options"])
+                                 + "."),
+        ONBOARDING_EDIT: lambda: (f"Change onboarding prompt {a['number']}",
+                                  f"Change onboarding prompt {a['number']} ({a['old_title']}) "
+                                  f"to **{a['title']}**, with the options: "
+                                  + "; ".join(_option_summary(o) for o in a["options"]) + "."),
+        ONBOARDING_REMOVE: lambda: (f"Remove onboarding prompt {a['number']}",
+                                    f"Remove onboarding prompt {a['number']}: "
+                                    f"**{a['old_title']}**."),
         EVENT_CANCEL: lambda: (f"Cancel the event {a['event']}",
                                f"Cancel the event **{a['event']}**."),
         KICK: lambda: (f"Kick {a['member_name']}", f"Remove <@{a['member']}> from the server. "
@@ -482,6 +571,8 @@ async def carry_out(guild, action):
         return "Done: the server has its new icon."
     if kind in RULE_KINDS:
         return await _carry_out_rule(guild, a)
+    if kind in ONBOARDING_KINDS:
+        return await _carry_out_onboarding(guild, a)
     if kind in WATCH_KINDS:
         words = automod.community_words()
         if kind == WATCH_ADD:
@@ -557,6 +648,34 @@ async def _carry_out_rule(guild, a):
     conduct.save_rules(current)
     await layout.post_texts(guild)
     return "Done: #rules is updated."
+
+
+async def _carry_out_onboarding(guild, a):
+    onboarding = await guild.onboarding()
+    prompts = list(onboarding.prompts)
+    number = a.get("number")
+    if a["kind"] == ONBOARDING_REMOVE:
+        if not 1 <= number <= len(prompts):
+            return "It couldn't be done: that prompt isn't there any more."
+        removed = prompts.pop(number - 1)
+        await onboarding.edit(prompts=prompts, reason=REASON)
+        return f"Done: the onboarding prompt {removed.title} is removed."
+    options = [discord.OnboardingPromptOption(
+                   o["title"], description=o["description"] or None,
+                   channels=[guild.get_channel(i) for i in o["channel_ids"]],
+                   roles=[guild.get_role(i) for i in o["role_ids"]])
+               for o in a["options"]]
+    prompt = discord.PartialOnboardingPrompt(
+        type=discord.OnboardingPromptType.multiple_choice, options=options, title=a["title"],
+        single_select=a["single_select"], required=a["required"])
+    if a["kind"] == ONBOARDING_ADD:
+        prompts.append(prompt)
+    else:
+        if not 1 <= number <= len(prompts):
+            return "It couldn't be done: that prompt isn't there any more."
+        prompts[number - 1] = prompt
+    await onboarding.edit(prompts=prompts, reason=REASON)
+    return f"Done: the onboarding prompt {a['title']} is saved."
 
 
 async def _carry_out_member(guild, a):

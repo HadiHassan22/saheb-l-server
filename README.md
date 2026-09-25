@@ -149,6 +149,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | The server | rename it; set its icon |
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
 | AutoMod | add or remove watch words; blocked words stay |
+| Onboarding | add, edit or remove a prompt new members see when they join, each with its options, descriptions and the channels or roles they point to |
 | Events | cancel someone else's event |
 | Members | kick, ban, unban |
 | Settings | any of the settings, within its range |
@@ -168,6 +169,10 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   github` shows admins, and only them, where the code is. Every admin
   action is posted in `#server-log`. What admins can do can grow by code
   change; who they are can't.
+- **Onboarding needs Discord's Community feature and Onboarding turned on**
+  (Server Settings, Safety Setup) before a vote or an admin can change it;
+  each option needs at least one channel or role (only ones made by vote
+  can be offered), so onboarding can be kept up to date as those change.
 - **Votes about a member** (kick, ban) need the member @mentioned and a
   reason, hide their count until they close, need `removal_percent`
   (66% to start, never below 60%) to pass, and the member can't vote on
@@ -391,7 +396,7 @@ Each proposal is attempted once. To try again, propose it again.
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
 | `admins.py` | The admins the owner picks, `/admin`, and who reads `#admin-log` (protected) |
-| `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 30 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
 | `guard.py` | Keeps every role cosmetic (protected) |
