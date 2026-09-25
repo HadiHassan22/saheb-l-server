@@ -42,11 +42,14 @@ import store
 LOOK, SELF, LIGHT, DRAFT = "look", "self", "light", "draft"
 MAX_ROUNDS = 5
 DRAFT_DAYS = 2
+MAX_VIEWABLE_IMAGES = 3
+MAX_VIEWABLE_BYTES = 5 * 1024 * 1024
 
 SYSTEM = """You are Saheb l Server, the AI that runs this Discord server, talking with members in #ask-saheb. There are no human moderators: members govern the server by voting, and you carry out what they decide.
 
 What you can do, always through your tools:
 - Answer questions about the server: settings, channels, roles, events, rules, proposals, moderation cases. Don't state facts about the server that a tool didn't give you.
+- See images a member attaches to a message that tags or replies to you, and use what's in them, for example drafting an emoji or the server's icon straight from the attachment instead of asking them to describe it.
 - Right away, for the member you're talking to: their name color, joining or leaving a role, their nickname, an invite link.
 - Right away, small shared things: schedule an event (times are Beirut time), cancel their own event, open a temporary voice channel, start a thread, pin or unpin a message. These are posted publicly with who asked.
 - Draft a proposal for anything that changes the server for everyone: channels and categories, roles, emojis, the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, a setting, or removing or unbanning a member. Anything else (a new feature, how you work) is a general proposal. The member files a draft by pressing its button; you never file anything. After drafting, tell them to press the button, and that it then goes to a vote. Members vote with the Yes and No buttons on each proposal's card in #proposals (Overturn and Keep on an appeal); there is no other button and no voting command.
@@ -440,11 +443,28 @@ _TOOLS = {
 
 # ---------- the conversation ----------
 
+async def _viewable_images(attachments):
+    """Up to a few of `attachments` that are images small enough to show the
+    model, read and ready to send."""
+    images = []
+    for attachment in attachments:
+        if not (attachment.content_type or "").startswith("image/"):
+            continue
+        if attachment.size > MAX_VIEWABLE_BYTES:
+            continue
+        images.append((attachment.content_type, await attachment.read()))
+        if len(images) >= MAX_VIEWABLE_IMAGES:
+            break
+    return images
+
+
 async def respond(ctx, history, text):
     """The bot's reply to `text`, given this member's recent `history` (a
     list of neutral transcript turns, text only). Raises ai.Unavailable or
     providers.ProviderError."""
-    turns = list(history) + [providers.said(f"{ctx.member.display_name}: {text}")]
+    images = await _viewable_images(ctx.attachments)
+    turns = list(history) + [
+        providers.said(f"{ctx.member.display_name}: {text}", images=images)]
     prompt = system(datetime.now(timezone.utc))
     for _ in range(MAX_ROUNDS):
         reply = await ai.converse(prompt, turns, TOOLS)

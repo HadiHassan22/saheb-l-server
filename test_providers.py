@@ -4,6 +4,7 @@
 """
 
 import asyncio
+import base64
 import unittest
 from types import SimpleNamespace
 
@@ -107,6 +108,31 @@ class Transcripts(unittest.TestCase):
         self.assertEqual([m["role"] for m in messages[1:]],
                          ["user", "assistant", "tool", "tool", "assistant"])
         self.assertIs(messages[2], raw)
+
+    def test_an_image_travels_as_a_data_url_beside_the_text(self):
+        turn = providers.said("what is this?", images=[("image/png", b"pixels")])
+        blocks = providers._content_blocks(turn)
+        self.assertEqual(blocks[0], {"type": "text", "text": "what is this?"})
+        self.assertEqual(blocks[1]["image_url"]["url"],
+                         "data:image/png;base64," + base64.b64encode(b"pixels").decode())
+        self.assertEqual(providers._content_blocks(providers.said("no picture here")),
+                         "no picture here")
+
+    def test_claude_sends_its_own_image_block_shape(self):
+        claude = providers.Claude.__new__(providers.Claude)
+        turn = providers.said("what is this?", images=[("image/png", b"pixels")])
+        blocks = claude._blocks(turn)
+        self.assertEqual(blocks[0], {"type": "text", "text": "what is this?"})
+        self.assertEqual(blocks[1]["source"]["media_type"], "image/png")
+        self.assertEqual(claude._blocks(providers.said("no picture here")), "no picture here")
+
+    def test_gemini_attaches_images_as_extra_parts(self):
+        gemini = providers.Gemini.__new__(providers.Gemini)
+        turn = providers.said("what is this?", images=[("image/png", b"pixels")])
+        content = gemini._contents([turn])[0]
+        self.assertEqual(len(content.parts), 2)
+        self.assertEqual(content.parts[1].inline_data.mime_type, "image/png")
+        self.assertEqual(content.parts[1].inline_data.data, b"pixels")
 
     def test_claude_json_answer_thinks_only_when_given_an_effort(self):
         claude = providers.Claude.__new__(providers.Claude)

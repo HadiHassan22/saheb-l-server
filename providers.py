@@ -14,6 +14,7 @@ Prices are dollars per million tokens and are estimates, used to keep a
 spending budget honest rather than to reproduce an invoice.
 """
 
+import base64
 import json
 import logging
 import os
@@ -87,8 +88,10 @@ def joined_system(system):
 
 # ---------- the neutral transcript ----------
 
-def said(text):
-    return {"role": "user", "text": text}
+def said(text, images=None):
+    """`images`: a list of (mime_type, raw_bytes), for a member's attachment
+    the model can see alongside the text."""
+    return {"role": "user", "text": text, "images": images or []}
 
 
 def answered(reply: Reply):
@@ -98,6 +101,24 @@ def answered(reply: Reply):
 def returned(results):
     """results: [{"id", "name", "result"}]"""
     return {"role": "tool", "results": results}
+
+
+def _data_url(mime, data):
+    return f"data:{mime};base64,{base64.b64encode(data).decode()}"
+
+
+def _content_blocks(turn):
+    """A user turn's text, or -- when it carries images -- the OpenAI-style
+    list of text and image_url blocks every OpenAI-compatible host expects.
+    Plain text when there's nothing to see, so a turn with no image reads
+    exactly as it always has."""
+    images = turn.get("images")
+    if not images:
+        return turn["text"]
+    return [{"type": "text", "text": turn["text"]}] + [
+        {"type": "image_url", "image_url": {"url": _data_url(mime, data)}}
+        for mime, data in images
+    ]
 
 
 # ---------- Gemini ----------
@@ -125,9 +146,11 @@ class Gemini:
         out = []
         for turn in turns:
             if turn["role"] == "user":
-                out.append(
-                    types.Content(role="user", parts=[types.Part(text=turn["text"])])
-                )
+                parts = [types.Part(text=turn["text"])] + [
+                    types.Part.from_bytes(data=data, mime_type=mime)
+                    for mime, data in turn.get("images") or []
+                ]
+                out.append(types.Content(role="user", parts=parts))
             elif turn["role"] == "model":
                 if turn.get("raw") is not None:
                     out.append(turn["raw"])
@@ -262,7 +285,7 @@ class Grok:
         messages = [{"role": "system", "content": system}] if system else []
         for turn in turns:
             if turn["role"] == "user":
-                messages.append({"role": "user", "content": turn["text"]})
+                messages.append({"role": "user", "content": _content_blocks(turn)})
             elif turn["role"] == "model":
                 if turn.get("raw") is not None:
                     messages.append(turn["raw"])
@@ -463,11 +486,23 @@ class Claude:
         self._anthropic = anthropic
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
 
+    def _blocks(self, turn):
+        """A user turn's text, or Anthropic's own image block form when it
+        carries images: plain text still travels as a bare string."""
+        images = turn.get("images")
+        if not images:
+            return turn["text"]
+        return [{"type": "text", "text": turn["text"]}] + [
+            {"type": "image", "source": {"type": "base64", "media_type": mime,
+                                         "data": base64.b64encode(data).decode()}}
+            for mime, data in images
+        ]
+
     def _messages(self, turns):
         out = []
         for turn in turns:
             if turn["role"] == "user":
-                out.append({"role": "user", "content": turn["text"]})
+                out.append({"role": "user", "content": self._blocks(turn)})
             elif turn["role"] == "model":
                 if turn.get("raw") is not None:
                     out.append({"role": "assistant", "content": turn["raw"]})
