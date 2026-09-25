@@ -13,8 +13,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import code_changes
 import health
 import proposals
+import setting_changes
 import store
 import updates
 
@@ -242,8 +244,8 @@ class Progress(WithTempData):
 class Passed(WithTempData):
     def test_only_passed_general_proposals_are_offered_oldest_first(self):
         for n in range(4):
-            proposals.open_proposal(n + 1, f"Idea {n}", "Do it.", NOW)
-        proposals.open_proposal(9, "", "", NOW, setting="quorum", value=8)
+            code_changes.KIND.open(n + 1, f"Idea {n}", "Do it.", NOW)
+        setting_changes.KIND.open(9, "quorum", 8, "", NOW)
         for no in (1, 2, 3, 5):
             for voter in range(10, 15):
                 proposals.cast(no, voter, 0, "yes" if no != 2 else "no", NOW + 60)
@@ -253,7 +255,7 @@ class Passed(WithTempData):
                          {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False})
 
     def test_a_change_an_admin_shipped_is_offered_at_once(self):
-        proposals.pass_now(proposals.open_proposal(7, "Dark mode", "Add it.", NOW)["no"],
+        proposals.pass_now(code_changes.KIND.open(7, "Dark mode", "Add it.", NOW)["no"],
                            7, NOW)
         self.assertEqual(health.passed_proposals(),
                          [{"no": 1, "title": "Dark mode", "details": "Add it.",

@@ -1,7 +1,9 @@
 """The Discord side of voting: /propose, /propose-setting, /settings, the
-card each proposal is posted as, its vote buttons, and closing votes when
-time is up. Also what admins can do to proposals (admins.py): pass one at
-once, and take one down with /admin withdraw.
+vote buttons on each proposal's card, opening proposals, and closing votes
+when time is up. Also what admins can do to proposals (admins.py): pass
+one at once, and take one down with /admin withdraw.
+
+How a proposal looks is in cards.py, and every way one ends in ending.py.
 """
 
 import logging
@@ -12,95 +14,15 @@ from discord import app_commands
 from discord.ext import tasks
 
 import admins
-import cases
+import cards
+import code_changes
+import ending
 import layout
 import proposals
+import setting_changes
 import settings
 
 log = logging.getLogger("voting")
-
-COLOURS = {
-    proposals.OPEN: discord.Colour.blurple(),
-    proposals.PASSED: discord.Colour.green(),
-    proposals.FAILED: discord.Colour.red(),
-    proposals.NO_QUORUM: discord.Colour.light_grey(),
-    proposals.WITHDRAWN: discord.Colour.dark_grey(),
-}
-RESULTS = {
-    proposals.PASSED: "Passed",
-    proposals.FAILED: "Failed",
-    proposals.NO_QUORUM: "Not enough votes",
-    proposals.WITHDRAWN: "Withdrawn",
-}
-# What Yes and No mean on each kind of proposal.
-CHOICES = {proposals.APPEAL: {"yes": "overturn", "no": "keep"}}
-PLAIN = {"yes": "yes", "no": "no"}
-
-# Called as `await hook(client, proposal)` after a proposal closes and its
-# result is posted. Appeals register here to carry out their result.
-AFTER_CLOSE = []
-
-
-def choices(p):
-    return CHOICES.get(p["kind"], PLAIN)
-
-
-def card(p):
-    yes, no = proposals.tally(p)
-    say = choices(p)
-    embed = discord.Embed(
-        title=f"Proposal {p['no']}: {p['title']}"[:256],
-        description=p["details"][:4000],
-        colour=COLOURS[p["status"]],
-    )
-    embed.add_field(name="Proposed by", value=f"<@{p['author_id']}>")
-    if p["status"] == proposals.OPEN:
-        embed.add_field(name="Closes", value=f"<t:{int(p['closes_at'])}:R>")
-        # A vote about a person shows turnout only, so nobody votes with the
-        # crowd against someone.
-        counted = (f"{yes + no} voted so far; the count is hidden until it closes"
-                   if p.get("blind") else f"{yes} {say['yes']} · {no} {say['no']}")
-        embed.add_field(
-            name="Votes",
-            value=(f"{counted}\nNeeds at least {p['quorum']} votes, and more than "
-                   f"{p['pass_percent']}% {say['yes']}"),
-            inline=False,
-        )
-    elif p.get("shipped_by"):
-        embed.add_field(name="Result",
-                        value=f"**Passed by an admin**, <@{p['shipped_by']}>, without a vote",
-                        inline=False)
-        if p.get("note"):
-            embed.add_field(name="Note", value=p["note"], inline=False)
-    elif p.get("withdrawn_by"):
-        embed.add_field(name="Result",
-                        value=f"**Withdrawn by an admin**, <@{p['withdrawn_by']}>, before "
-                              "the vote ended",
-                        inline=False)
-        if p.get("note"):
-            embed.add_field(name="Why", value=p["note"][:1000], inline=False)
-    else:
-        embed.add_field(
-            name="Result",
-            value=f"**{RESULTS[p['status']]}**: {yes} {say['yes']} · {no} {say['no']}",
-            inline=False,
-        )
-        if p.get("note"):
-            embed.add_field(name="Note", value=p["note"], inline=False)
-    footer = (f"Secret ballot. Members of {p['voter_min_days']}+ days, and everyone "
-              "who joined in the server's first week, can vote. "
-              "Discuss in the thread.")
-    if p.get("shipped_by"):
-        footer = ("An admin skipped the vote. " + (
-            "The code change still goes through every automatic check, and progress "
-            "is posted here." if p["kind"] == proposals.GENERAL
-            else "The bot carries it out at once, and says so here."))
-    elif p.get("withdrawn_by"):
-        footer = "An admin withdrew this proposal. Its ballots were not counted."
-    elif p["kind"] == proposals.APPEAL:
-        footer += " The member this case is about can't vote on it."
-    embed.set_footer(text=footer)
-    return embed
 
 
 class VoteButton(discord.ui.DynamicItem[discord.ui.Button],
@@ -134,15 +56,15 @@ class VoteButton(discord.ui.DynamicItem[discord.ui.Button],
         except proposals.Refused as e:
             return await interaction.response.send_message(str(e), ephemeral=True)
         await interaction.response.send_message(
-            f"You voted **{choices(p)[self.choice]}**. You can change it until "
+            f"You voted **{cards.choices(p)[self.choice]}**. You can change it until "
             "voting closes.",
             ephemeral=True,
         )
-        await interaction.message.edit(embed=card(proposals.get(self.no)))
+        await interaction.message.edit(embed=cards.card(proposals.get(self.no)))
 
 
 def vote_buttons(p):
-    say = choices(p)
+    say = cards.choices(p)
     view = discord.ui.View(timeout=None)
     view.add_item(VoteButton("yes", p["no"], say["yes"]))
     view.add_item(VoteButton("no", p["no"], say["no"]))
@@ -165,117 +87,54 @@ async def publish(interaction, opener, guild=None, by_admin=False):
     `by_admin` passes it at once and carries it out, as a passed vote
     would be; checking that the member is an admin is the caller's job."""
     await interaction.response.defer(ephemeral=True, thinking=True)
-    channel = layout.channel(guild or interaction.guild, "proposals")
-    if channel is None:
-        return await interaction.followup.send(
-            "The proposals channel isn't set up yet, so nothing was proposed.",
-            ephemeral=True,
-        )
+    guild = guild or interaction.guild
     try:
-        p = opener(int(time.time()))
         if by_admin:
-            p = proposals.pass_now(p["no"], interaction.user.id, int(time.time()))
+            p, said = await ship(interaction.client, guild, opener, interaction.user.id)
+            await interaction.followup.send(
+                f"Proposal {p['no']} passed without a vote. {said or ''}"[:2000],
+                ephemeral=True)
+            return p
+        channel = layout.channel(guild, "proposals")
+        if channel is None:
+            raise proposals.Refused("The proposals channel isn't set up yet, so nothing "
+                                    "was proposed.")
+        p = opener(int(time.time()))
     except proposals.Refused as e:
         return await interaction.followup.send(str(e), ephemeral=True)
-    if not by_admin:
-        p = proposals.fit_quorum(p["no"], people(channel.guild))
-    message = await _post_card(p, channel)
+    p = proposals.fit_quorum(p["no"], people(channel.guild))
+    message = await cards.post(p, channel, vote_buttons(p))
     await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
                                     ephemeral=True)
-    if by_admin:
-        await _shipped(interaction.client, p, channel.guild, message)
     return p
 
 
 async def ship(client, guild, opener, admin_id):
-    """What an admin asked for in #ask-saheb, done at once: the proposal
-    `opener(now)` opens is passed on their word, its card posted, and it
-    is carried out as a passed vote would be. Returns the proposal and a
-    sentence saying what came of it. Raises proposals.Refused if it can't be opened;
-    checking that `admin_id` is an admin is the caller's job."""
-    channel = layout.channel(guild, "proposals")
-    if channel is None:
+    """What an admin asked for, done at once: the proposal `opener(now)`
+    opens is passed on their word, its card posted, and it is carried out
+    as a passed vote would be (ending.py). Returns the proposal and a
+    sentence saying what came of it. Raises proposals.Refused if it can't
+    be opened; checking that `admin_id` is an admin is the caller's job."""
+    if layout.channel(guild, "proposals") is None:
         raise proposals.Refused("The proposals channel isn't set up yet.")
     p = opener(int(time.time()))
-    p = proposals.pass_now(p["no"], admin_id, int(time.time()))
-    message = await _post_card(p, channel)
-    said = await _shipped(client, p, guild, message)
-    if said:
-        return p, " ".join(said)
-    if p["kind"] == proposals.SETTING:
-        return p, (f"Done: {settings.SETTINGS[p['setting']]['label']} is now "
-                   f"{settings.describe(p['setting'], p['value'])}.")
-    return p, (f"Passed as proposal {p['no']}. It will be written as a code change, "
-               "checked and deployed automatically; progress is posted under its card.")
-
-
-async def _post_card(p, channel):
-    view = vote_buttons(p) if p["status"] == proposals.OPEN else discord.utils.MISSING
-    message = await channel.send(embed=card(p), view=view)
-    proposals.attach_message(p["no"], channel.id, message.id)
-    try:
-        await message.create_thread(name=f"Proposal {p['no']}: {p['title']}"[:100])
-    except discord.HTTPException as e:
-        log.warning(f"no thread for proposal {p['no']}: {e!r}")
-    return message
-
-
-async def _shipped(client, p, guild, message):
-    await layout.server_log(
-        guild, f"<@{p['shipped_by']}> passed proposal {p['no']} ({p['title']}) "
-        f"without a vote, as an admin: {message.jump_url}")
-    return await carry_out(client, p, guild)
-
-
-async def carry_out(client, p, guild):
-    """Do what a proposal an admin passed says, as when a vote passes it.
-    Returns what the hooks said about it."""
-    if p["kind"] == proposals.SETTING:
-        await layout.post_texts(guild)  # #welcome quotes the settings
-    return await after_close(client, p)
-
-
-async def after_close(client, p):
-    """Run every hook on a closed proposal. Returns what they said, for
-    hooks that say something (actions.settle, what it did)."""
-    said = []
-    for hook in AFTER_CLOSE:
-        try:
-            result = await hook(client, p)
-        except Exception as e:
-            log.error(f"{hook.__name__} failed for proposal {p['no']}: {e!r}")
-            continue
-        if isinstance(result, str):
-            said.append(result)
-    return said
+    return await ending.pass_now(client, guild, p["no"], admin_id, int(time.time()))
 
 
 @admins.group.command(name="withdraw",
                       description="Admins: take an open proposal down without a vote")
 @app_commands.describe(proposal="The proposal's number", reason="Why (shown on its card)")
 async def withdraw(interaction: discord.Interaction, proposal: int, reason: str = ""):
-    guild = interaction.guild
-    if not admins.allowed(interaction.user.id, guild):
+    if not admins.allowed(interaction.user.id, interaction.guild):
         return await interaction.response.send_message(
             "Only an admin can withdraw a proposal.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        p = proposals.withdraw(proposal, interaction.user.id, reason[:500], int(time.time()))
+        p = await ending.withdraw(interaction.client, interaction.guild, proposal,
+                                  interaction.user.id, reason[:500], int(time.time()))
     except proposals.Refused as e:
-        return await interaction.response.send_message(str(e), ephemeral=True)
-    if p["kind"] == proposals.APPEAL:
-        cases.update(p["case_no"], appeal=None)  # so it can be appealed again
-    channel = interaction.client.get_channel(p.get("channel_id") or 0)
-    if channel is not None:
-        try:
-            message = await channel.fetch_message(p["message_id"])
-            await message.edit(embed=card(p), view=None)
-        except discord.HTTPException as e:
-            log.warning(f"proposal {p['no']}'s card wasn't updated: {e!r}")
-    await layout.server_log(
-        guild, f"{interaction.user.mention} withdrew proposal {p['no']} ({p['title']}) "
-        "as an admin" + (f": {reason.strip()}" if reason.strip() else "."))
-    await interaction.response.send_message(f"Proposal {p['no']} is withdrawn.",
-                                            ephemeral=True)
+        return await interaction.followup.send(str(e), ephemeral=True)
+    await interaction.followup.send(f"Proposal {p['no']} is withdrawn.", ephemeral=True)
 
 
 class ProposeForm(discord.ui.Modal, title="New proposal"):
@@ -287,7 +146,7 @@ class ProposeForm(discord.ui.Modal, title="New proposal"):
     )
 
     async def on_submit(self, interaction):
-        await publish(interaction, lambda now: proposals.open_proposal(
+        await publish(interaction, lambda now: code_changes.KIND.open(
             interaction.user.id, self.name.value, self.details.value, now))
 
 
@@ -307,8 +166,8 @@ async def propose(interaction: discord.Interaction):
 async def propose_setting(interaction: discord.Interaction,
                           setting: app_commands.Choice[str], value: int,
                           reason: str = ""):
-    await publish(interaction, lambda now: proposals.open_proposal(
-        interaction.user.id, "", reason, now, setting=setting.value, value=value))
+    await publish(interaction, lambda now: setting_changes.KIND.open(
+        interaction.user.id, setting.value, value, reason, now))
 
 
 @app_commands.command(name="settings", description="The settings the bot runs by")
@@ -324,35 +183,6 @@ async def show_settings(interaction: discord.Interaction):
     await interaction.response.send_message("\n".join(lines), ephemeral=True)
 
 
-def announcement(p):
-    yes, no = proposals.tally(p)
-    say = choices(p)
-    counts = f"{yes} {say['yes']}, {no} {say['no']}"
-    if p["status"] == proposals.NO_QUORUM:
-        stands = (f" Case {p['case_no']} stands."
-                  if p["kind"] == proposals.APPEAL else "")
-        return (f"Proposal {p['no']} did not get enough votes to count "
-                f"({counts}; it needed {p['quorum']}).{stands}")
-    if p["kind"] == proposals.APPEAL:
-        if p["status"] == proposals.PASSED:
-            return (f"Proposal {p['no']} passed ({counts}): case {p['case_no']} "
-                    "is overturned.")
-        return f"Proposal {p['no']} failed ({counts}): case {p['case_no']} stands."
-    if p["status"] == proposals.FAILED:
-        return f"Proposal {p['no']} failed ({counts})."
-    if p.get("note"):
-        return f"Proposal {p['no']} passed ({counts}). {p['note']}"
-    if p["kind"] == proposals.ACTION:
-        return f"Proposal {p['no']} passed ({counts}). The bot is making the change now."
-    if p["kind"] == proposals.SETTING:
-        return (f"Proposal {p['no']} passed ({counts}). "
-                f"{settings.SETTINGS[p['setting']]['label']} is now "
-                f"{settings.describe(p['setting'], p['value'])}.")
-    return (f"Proposal {p['no']} passed ({counts}). It will now be written as a "
-            "code change, checked, and deployed automatically. Progress will be "
-            "posted here.")
-
-
 @tasks.loop(minutes=1)
 async def close_due(client):
     await client.wait_until_ready()
@@ -360,40 +190,9 @@ async def close_due(client):
         # An exception escaping a task loop stops it for good, and then no
         # vote ever closes again.
         try:
-            p = proposals.close(due["no"], int(time.time()))
+            await ending.close(client, due["no"], int(time.time()))
         except Exception as e:
             log.error(f"closing proposal {due['no']} failed: {e!r}")
-            continue
-        log.info(f"proposal {p['no']} closed: {p['status']}")
-        try:
-            await post_result(client, p)
-        except Exception as e:
-            log.error(f"the result of proposal {p['no']} was not posted: {e!r}")
-        await after_close(client, p)
-
-
-async def reply_to(client, p, text):
-    """Say something under proposal `p`'s card, or in its channel if the
-    card is gone."""
-    channel = client.get_channel((p or {}).get("channel_id") or 0)
-    if channel is None:
-        return
-    try:
-        message = await channel.fetch_message(p["message_id"])
-        await message.reply(text, mention_author=False)
-    except discord.HTTPException:
-        await channel.send(text)
-
-
-async def post_result(client, p):
-    channel = client.get_channel(p["channel_id"] or 0)
-    if channel is None:
-        return
-    message = await channel.fetch_message(p["message_id"])
-    await message.edit(embed=card(p), view=None)
-    await message.reply(announcement(p), mention_author=False)
-    if p["kind"] == proposals.SETTING and p["status"] == proposals.PASSED:
-        await layout.post_texts(channel.guild)  # #welcome quotes the settings
 
 
 def setup(client, tree):

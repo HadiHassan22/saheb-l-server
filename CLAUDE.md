@@ -39,10 +39,14 @@ first server it joins as home (leaving any other), calls each module's
   times passed in as epoch seconds), `judge.py` (routing a flagged
   message), `settings.py` (every tunable number, with bounds fixed in
   code), `cases.py`, `conduct.py`. Test these directly.
-- **Voting:** `voting_ui.py` posts cards and buttons and closes votes;
-  passed proposals run the hooks in `voting_ui.AFTER_CLOSE` (`actions.py`
-  for server changes, `appeals.py` for appeals). An admin's Ship it goes
-  through `proposals.pass_now` and the same hooks.
+- **Voting:** `proposals.py` is the lifecycle every proposal shares.
+  Each kind of proposal (`kinds.py`) is one module that says how it
+  opens, what Yes and No mean, and what it does when it passes or not:
+  `code_changes.py` (general), `setting_changes.py`, `actions.py` (server
+  changes), `appeals.py`. Every ending, a vote closing or an admin's Ship
+  it or withdraw, goes through `ending.py`, which updates the card
+  (`cards.py`), logs admin actions and calls the kind. `voting_ui.py`
+  holds the commands, the vote buttons and opening.
 - **Moderation:** AutoMod (`automod.py` word lists) flags, `moderator.py`
   gathers context and applies the sanction `judge.py` picks. The bot never
   reads unflagged messages.

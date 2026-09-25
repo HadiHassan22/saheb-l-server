@@ -33,9 +33,11 @@ import ai
 import cases
 import colors
 import conduct
+import kinds
 import proposals
 import providers
 import quick
+import setting_changes
 import settings
 import store
 import voting_ui
@@ -209,14 +211,14 @@ def _drafts():
     return store.load("drafts", {"next": 1, "drafts": {}})
 
 
-def save_draft(author_id, kind, title, details, payload, now, about=None):
+def save_draft(author_id, kind, title, details, payload, now):
     data = _drafts()
     for key in [k for k, d in data["drafts"].items()
                 if now - d["at"] > DRAFT_DAYS * 86400]:
         del data["drafts"][key]
     no = data["next"]
     draft = {"no": no, "author_id": author_id, "kind": kind, "title": title,
-             "details": details, "payload": payload, "about": about, "at": now,
+             "details": details, "payload": payload, "at": now,
              "filed": None}
     data["next"] = no + 1
     data["drafts"][str(no)] = draft
@@ -235,18 +237,9 @@ def mark_filed(no, proposal_no):
 
 
 def opener(draft, author_id):
-    """The function voting_ui.publish needs to file `draft`."""
-    kind, payload = draft["kind"], draft["payload"]
-    if kind == proposals.ACTION:
-        return lambda now: proposals.open_action(
-            author_id, payload, draft["title"], draft["details"], now,
-            about=draft.get("about"))
-    if kind == proposals.SETTING:
-        return lambda now: proposals.open_proposal(
-            author_id, "", payload.get("reason", ""), now,
-            setting=payload["setting"], value=payload["value"])
-    return lambda now: proposals.open_proposal(
-        author_id, draft["title"], draft["details"], now)
+    """The function voting_ui.publish needs to file `draft`, as its kind of
+    proposal (kinds.py)."""
+    return lambda now: kinds.of(draft).open_draft(author_id, draft, now)
 
 
 # ---------- tools ----------
@@ -380,9 +373,9 @@ async def _unpin_message(ctx, args):
     return _done(await quick.pin(ctx.member, args["link"], pinned=False))
 
 
-async def _draft(ctx, kind, title, details, payload, about=None):
+async def _draft(ctx, kind, title, details, payload):
     """Draft it for the member to file, or, for an admin, do it at once."""
-    draft = save_draft(ctx.member.id, kind, title, details, payload, time.time(), about)
+    draft = save_draft(ctx.member.id, kind, title, details, payload, time.time())
     if ctx.admin and not needs_confirming(kind, payload):
         try:
             p, said = await voting_ui.ship(ctx.client, ctx.guild, opener(draft, ctx.member.id),
@@ -390,7 +383,7 @@ async def _draft(ctx, kind, title, details, payload, about=None):
         except proposals.Refused as e:
             return _json(error=str(e))
         mark_filed(draft["no"], p["no"])
-        return _json(done=title, result=said)
+        return _json(done=title, proposal=p["no"], result=said)
     ctx.drafts.append(draft)
     if ctx.admin:
         return _json(drafted=title, note="Deleting needs the admin to confirm: they now "
@@ -423,8 +416,7 @@ async def _draft_action(ctx, args):
     if problem:
         return _json(error=problem)
     title, details = actions.describe(action)
-    about = int(action["member"]) if action["kind"] in actions.ABOUT_A_MEMBER else None
-    return await _draft(ctx, proposals.ACTION, title, details, action, about)
+    return await _draft(ctx, proposals.ACTION, title, details, action)
 
 
 async def _draft_cancel_event(ctx, args):
@@ -433,14 +425,11 @@ async def _draft_cancel_event(ctx, args):
 
 async def _draft_setting_change(ctx, args):
     name, value = args["setting"], int(args["value"])
-    problem = settings.check(name, value)
+    problem = setting_changes.problem(name, value)
     if problem:
         return _json(error=problem)
-    if settings.current()[name] == value:
-        return _json(error="It is already set to that.")
-    spec = settings.SETTINGS[name]
-    title = f"{spec['label']}: {settings.describe(name, value)}"
-    return await _draft(ctx, proposals.SETTING, title, args.get("reason", ""),
+    return await _draft(ctx, proposals.SETTING, setting_changes.title(name, value),
+                        args.get("reason", ""),
                   {"setting": name, "value": value, "reason": args.get("reason", "")})
 
 

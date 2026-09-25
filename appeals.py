@@ -13,6 +13,10 @@
 - Every result updates the case in #mod-log and posts the running share
   of appeals that overturned the moderator: if that share is high, the
   moderator is too strict.
+- An appeal an admin withdraws doesn't count: the case can be appealed
+  again.
+
+An appeal is the appeal kind of proposal (kinds.py).
 """
 
 import logging
@@ -23,6 +27,7 @@ from discord import app_commands
 import cases
 import conduct
 import judge
+import kinds
 import layout
 import proposals
 import voting_ui
@@ -63,21 +68,10 @@ def appeal_text(case, reason):
 
 
 async def file(interaction, case_no, reason, guild):
-    """Open the appeal and post it. The check that the case can still be
-    appealed and marking it appealed happen in one step with no await
-    between them, so two appeals of the same case can't both get through."""
-    def opener(now):
-        case = cases.get(case_no)
-        problem = cases.why_not_appealable(case)
-        if problem:
-            raise proposals.Refused(problem)
-        title, details = appeal_text(case, reason)
-        p = proposals.open_appeal(interaction.user.id, case_no, case["user_id"],
-                                  title, details, now)
-        cases.update(case_no, appeal=p["no"])
-        return p
-
-    p = await voting_ui.publish(interaction, opener, guild=guild)
+    """Open the appeal and post it."""
+    p = await voting_ui.publish(
+        interaction, lambda now: KIND.open(interaction.user.id, case_no, reason, now),
+        guild=guild)
     if p is not None:
         await _note(guild, cases.get(case_no),
                     f"Under appeal: proposal {p['no']}, closing <t:{int(p['closes_at'])}:R>.")
@@ -139,23 +133,50 @@ async def appeal(interaction: discord.Interaction, case: int):
     await interaction.response.send_modal(AppealForm(case, interaction.guild))
 
 
-async def settle(client, p):
-    """Carry out a closed appeal. Registered in voting_ui.AFTER_CLOSE."""
-    if p["kind"] != proposals.APPEAL:
-        return
-    guild = client.get_guild(layout.home_id() or 0)
-    case = cases.get(p["case_no"])
-    if p["status"] != proposals.PASSED:
+class Appeal(kinds.Kind):
+    choices = {"yes": "overturn", "no": "keep"}
+    footer = " The member this case is about can't vote on it."
+
+    def open(self, author_id, case_no, reason, now):
+        """Open a vote on overturning case `case_no`, and mark the case
+        appealed. Checking and marking happen in one step with no await
+        between them, so two appeals of the same case can't both get
+        through. The member the case is about can't vote on it."""
+        case = cases.get(case_no)
+        problem = cases.why_not_appealable(case)
+        if problem:
+            raise proposals.Refused(problem)
+        title, details = appeal_text(case, reason)
+        p = proposals.file(author_id, proposals.APPEAL, title, details, now,
+                           excluded=[case["user_id"]], case_no=case_no)
+        cases.update(case_no, appeal=p["no"])
+        return p
+
+    async def carry_out(self, client, guild, p):
+        case = cases.get(p["case_no"])
+        done = await _undo(client, guild, case)
+        cases.update(case["no"], status=cases.OVERTURNED, appeal_result="overturned")
+        await _note(guild, case, f"**Overturned** by proposal {p['no']}. {done}")
+        await _post_record(guild)
+        return f"Case {case['no']} is overturned."
+
+    async def not_passed(self, client, guild, p):
+        case = cases.get(p["case_no"])
+        if p["status"] == proposals.WITHDRAWN:
+            cases.update(case["no"], appeal=None)  # so it can be appealed again
+            await _note(guild, case, f"Proposal {p['no']} was withdrawn by an admin, so "
+                                     "the case can be appealed again.")
+            return None
         cases.update(case["no"], appeal_result="upheld")
         await _note(guild, case, f"Appealed in proposal {p['no']}, which did not pass. "
                                  "The action stands.")
         await _tell(client, case["user_id"],
                     f"Your appeal of case {case['no']} did not pass, so the action stands.")
-    else:
-        done = await _undo(client, guild, case)
-        cases.update(case["no"], status=cases.OVERTURNED, appeal_result="overturned")
-        await _note(guild, case, f"**Overturned** by proposal {p['no']}. {done}")
-    await _post_record(guild)
+        await _post_record(guild)
+        return f"Case {case['no']} stands."
+
+
+KIND = kinds.register(proposals.APPEAL, Appeal())
 
 
 async def _undo(client, guild, case):
@@ -243,4 +264,3 @@ async def _post_record(guild):
 def setup(client, tree):
     client.add_dynamic_items(AppealButton)
     tree.add_command(appeal)
-    voting_ui.AFTER_CLOSE.append(settle)

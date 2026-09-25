@@ -14,6 +14,7 @@ from unittest import mock
 import discord
 
 import appeals
+import cards
 import cases
 import judge
 import layout
@@ -51,25 +52,35 @@ class Withdrawing(WithTempData, unittest.IsolatedAsyncioTestCase):
             guild=types.SimpleNamespace(id=99, owner_id=1),
             client=types.SimpleNamespace(get_channel=lambda cid: channel),
             response=types.SimpleNamespace(
-                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+                defer=mock.AsyncMock(),
+                send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))),
+            followup=types.SimpleNamespace(
+                send=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
+        notes = []
+
+        async def note(guild, case, text):
+            notes.append(text)
+
         with mock.patch.object(layout, "home_id", lambda: 99), \
+                mock.patch.object(appeals, "_note", note), \
                 mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
             await voting_ui.withdraw.callback(interaction, no, "Filed by mistake")
-        return sent[0], card, logged
+        return sent[0], card, logged, notes
 
     async def test_an_admin_withdraws_an_appeal_and_the_case_can_be_appealed_again(self):
         case = self.case()
-        p = proposals.open_appeal(APPELLANT, case["no"], SUBJECT, "Appeal", "Details", NOW)
-        cases.update(case["no"], appeal=p["no"])
-        said, card, logged = await self.withdraw(APPELLANT, p["no"])
+        p = appeals.KIND.open(APPELLANT, case["no"], "A mistake.", NOW)
+        said, card, logged, notes = await self.withdraw(APPELLANT, p["no"])
         self.assertIn("Only an admin", said)
         logged.assert_not_awaited()
-        said, card, logged = await self.withdraw(1, p["no"])  # the owner
+        proposals.attach_message(p["no"], 6, 60)
+        said, card, logged, notes = await self.withdraw(1, p["no"])  # the owner
         self.assertIn("withdrawn", said)
         card.edit.assert_awaited_once()
         self.assertIn("Filed by mistake", logged.call_args.args[1])
         self.assertEqual(proposals.get(p["no"])["status"], proposals.WITHDRAWN)
         self.assertIsNone(cases.why_not_appealable(cases.get(case["no"])))
+        self.assertIn("appealed again", notes[0])  # not left "Under appeal" in #mod-log
 
 
 class Rules(WithTempData):
@@ -83,18 +94,19 @@ class Rules(WithTempData):
         self.assertIn("overturned", cases.why_not_appealable(other))
 
     def test_the_member_a_case_is_about_cannot_vote_on_it(self):
-        p = proposals.open_appeal(APPELLANT, 1, SUBJECT, "Appeal", "Details", NOW)
+        p = appeals.KIND.open(APPELLANT, self.case()["no"], "A mistake.", NOW)
         self.assertEqual((p["kind"], p["case_no"], p["excluded"]),
                          (proposals.APPEAL, 1, [SUBJECT]))
+        self.assertEqual(cases.get(1)["appeal"], p["no"])
         with self.assertRaisesRegex(proposals.Refused, "own case"):
             proposals.cast(p["no"], SUBJECT, NOW - 30 * cases.DAY, "yes", NOW)
         proposals.cast(p["no"], APPELLANT, NOW - 30 * cases.DAY, "yes", NOW)
 
     def test_appeals_count_towards_the_open_proposal_limit(self):
-        for n in range(3):
-            proposals.open_appeal(APPELLANT, n, SUBJECT, "Appeal", "Details", NOW)
+        for _ in range(3):
+            appeals.KIND.open(APPELLANT, self.case()["no"], "A mistake.", NOW)
         with self.assertRaisesRegex(proposals.Refused, "limit"):
-            proposals.open_appeal(APPELLANT, 9, SUBJECT, "Appeal", "Details", NOW)
+            appeals.KIND.open(APPELLANT, self.case()["no"], "A mistake.", NOW)
 
     def test_appeal_record_counts_decided_appeals_only(self):
         for result in ("overturned", "upheld", None):
@@ -115,10 +127,12 @@ class Text(WithTempData):
         self.assertNotIn("123456", details)
 
     def test_appeal_cards_vote_overturn_or_keep(self):
-        p = proposals.open_appeal(APPELLANT, 1, SUBJECT, "Appeal of case 1", "Details", NOW)
+        p = appeals.KIND.open(APPELLANT, self.case()["no"], "A mistake.", NOW)
         labels = [item.item.label for item in voting_ui.vote_buttons(p).children]
         self.assertEqual(labels, ["Overturn", "Keep"])
-        self.assertIn("0 overturn · 0 keep", voting_ui.card(p).fields[2].value)
+        embed = cards.card(p)
+        self.assertIn("0 overturn · 0 keep", embed.fields[2].value)
+        self.assertIn("can't vote on it", embed.footer.text)
 
 
 class Filing(WithTempData, unittest.IsolatedAsyncioTestCase):
@@ -205,7 +219,9 @@ class Settling(WithTempData, unittest.IsolatedAsyncioTestCase):
 
     async def test_an_overturned_timeout_is_lifted_and_leaves_the_record(self):
         case = self.case()
-        await appeals.settle(self.client, self.closed(case, proposals.PASSED))
+        said = await appeals.KIND.carry_out(self.client, self.guild,
+                                            self.closed(case, proposals.PASSED))
+        self.assertEqual(said, "Case 1 is overturned.")
         self.assertTrue(self.member.lifted)
         after = cases.get(case["no"])
         self.assertEqual((after["status"], after["appeal_result"]),
@@ -217,23 +233,32 @@ class Settling(WithTempData, unittest.IsolatedAsyncioTestCase):
 
     async def test_an_overturned_ban_unbans_and_sends_an_invite(self):
         case = self.case(action=cases.BAN)
-        await appeals.settle(self.client, self.closed(case, proposals.PASSED))
+        await appeals.KIND.carry_out(self.client, self.guild,
+                                     self.closed(case, proposals.PASSED))
         self.assertEqual(self.unbanned, [SUBJECT])
         self.assertIn("https://discord.gg/abc", self.dms[0])
         self.assertIn("sent an invite back", self.notes[0])
 
     async def test_a_failed_appeal_leaves_the_case_standing(self):
         case = self.case()
-        await appeals.settle(self.client, self.closed(case, proposals.NO_QUORUM))
+        said = await appeals.KIND.not_passed(self.client, self.guild,
+                                             self.closed(case, proposals.NO_QUORUM))
+        self.assertEqual(said, "Case 1 stands.")
         after = cases.get(case["no"])
         self.assertEqual((after["status"], after["appeal_result"]), (cases.ACTIVE, "upheld"))
         self.assertFalse(self.member.lifted)
         self.assertIn("action stands", self.dms[0])
         self.assertIn("0 of 1", self.log_posts[0])
 
-    async def test_other_proposals_are_ignored(self):
-        await appeals.settle(self.client, {"kind": proposals.GENERAL, "status": "passed"})
-        self.assertEqual((self.notes, self.log_posts), ([], []))
+    async def test_a_withdrawn_appeal_decides_nothing(self):
+        case = cases.update(self.case()["no"], appeal=5)
+        said = await appeals.KIND.not_passed(self.client, self.guild,
+                                             self.closed(case, proposals.WITHDRAWN))
+        self.assertIsNone(said)
+        after = cases.get(case["no"])
+        self.assertEqual((after["appeal"], after.get("appeal_result")), (None, None))
+        self.assertIn("appealed again", self.notes[0])
+        self.assertEqual((self.dms, self.log_posts), ([], []))
 
 
 class Note(unittest.IsolatedAsyncioTestCase):

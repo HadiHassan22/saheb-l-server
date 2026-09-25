@@ -1,4 +1,5 @@
-"""Proposals from opening to close. No Discord here: voting_ui.py does that.
+"""Proposals from opening to close, the same for every kind of proposal
+(kinds.py). No Discord here: voting_ui.py and ending.py do that.
 
 Every time is epoch seconds and is passed in, so the whole lifecycle can be
 tested without a clock or a server.
@@ -21,10 +22,11 @@ never below the lowest quorum the setting allows.
 import settings
 import store
 
-GENERAL = "general"
-SETTING = "setting"
-APPEAL = "appeal"
-ACTION = "action"  # a server change (actions.py) carried out when it passes
+# The kinds of proposal, each defined in its own module (kinds.py).
+GENERAL = "general"  # code_changes.py
+SETTING = "setting"  # setting_changes.py
+APPEAL = "appeal"  # appeals.py
+ACTION = "action"  # a server change, actions.py
 
 OPEN = "open"
 PASSED = "passed"
@@ -67,104 +69,54 @@ def _check_limit(data, current, author_id):
         )
 
 
-def _file(data, current, author_id, proposal, now):
-    """Give `proposal` its number, voting rules and clock, and save it."""
+def file(author_id, kind, title, details, now, excluded=(), blind=False,
+         bar="pass_percent", **fields):
+    """Open a proposal of `kind` (kinds.py) and return it, with its number
+    and the voting rules it locks in. The kind has already checked it.
+    `excluded`: members who can't vote on it. `blind`: its count stays
+    hidden until it closes. `bar`: the setting it needs to pass, above
+    that share of Yes. Anything else in `fields` is kept on it for its
+    kind."""
+    current = settings.current()
+    data = _load()
+    _check_limit(data, current, author_id)
     no = data["next_no"]
-    proposal.update(
-        no=no,
-        author_id=author_id,
-        opened_at=now,
-        closes_at=now + current["voting_hours"] * 60 * 60,
-        quorum=current["quorum"],
-        pass_percent=current["pass_percent"],
-        voter_min_days=current["voter_min_days"],
-        status=OPEN,
-        votes={},
-        channel_id=None,
-        message_id=None,
-    )
-    proposal.setdefault("excluded", [])
+    proposal = {
+        **fields,
+        "kind": kind,
+        "title": title,
+        "details": details,
+        "no": no,
+        "author_id": author_id,
+        "opened_at": now,
+        "closes_at": now + current["voting_hours"] * 60 * 60,
+        "quorum": current["quorum"],
+        "pass_percent": current[bar],
+        "voter_min_days": current["voter_min_days"],
+        "status": OPEN,
+        "votes": {},
+        "excluded": list(excluded),
+        "channel_id": None,
+        "message_id": None,
+    }
+    if blind:
+        proposal["blind"] = True
     data["next_no"] = no + 1
     data["proposals"][str(no)] = proposal
     _save(data)
     return proposal
 
 
-def open_appeal(author_id, case_no, subject_id, title, details, now):
-    """Open a vote on overturning moderation case `case_no`. The member it
-    was about (`subject_id`) cannot vote on it. Checking that the case can
-    be appealed is the caller's job (`cases.why_not_appealable`)."""
-    current = settings.current()
-    data = _load()
-    _check_limit(data, current, author_id)
-    return _file(data, current, author_id, {
-        "kind": APPEAL, "title": title, "details": details,
-        "case_no": case_no, "excluded": [subject_id],
-    }, now)
-
-
-def open_action(author_id, action, title, details, now, about=None):
-    """Open a vote on a server change from actions.py, already checked.
-    `about` is the member it acts on, if any: they can't vote, the tally
-    stays hidden until it closes, and it needs `removal_percent` to pass."""
-    current = settings.current()
-    data = _load()
-    _check_limit(data, current, author_id)
-    proposal = _file(data, current, author_id, {
-        "kind": ACTION, "title": title, "details": details, "action": action,
-    }, now)
-    if about is not None:
-        proposal.update(excluded=[about], blind=True,
-                        pass_percent=current["removal_percent"])
-        _save(data)
-    return proposal
-
-
-def open_proposal(author_id, title, details, now, setting=None, value=None):
-    """Open a proposal and return it. With `setting` and `value`, it is a
-    proposal to change that setting, which is applied automatically if it
-    passes."""
-    current = settings.current()
-    data = _load()
-    _check_limit(data, current, author_id)
-    proposal = {
-        "kind": GENERAL,
-        "title": title.strip(),
-        "details": details.strip(),
-    }
-    if setting is not None:
-        problem = settings.check(setting, value)
-        if problem:
-            raise Refused(problem[0].upper() + problem[1:] + ".")
-        if current[setting] == value:
-            raise Refused(f"{settings.SETTINGS[setting]['label']} is already "
-                          f"{settings.describe(setting, value)}.")
-        spec = settings.SETTINGS[setting]
-        proposal = {
-            "kind": SETTING,
-            "title": f"{spec['label']}: {settings.describe(setting, value)}",
-            "details": (f"Change {spec['label'].lower()} from "
-                        f"{settings.describe(setting, current[setting])} to "
-                        f"{settings.describe(setting, value)}."
-                        + (f"\n\n{details.strip()}" if details.strip() else "")),
-            "setting": setting,
-            "value": value,
-        }
-    return _file(data, current, author_id, proposal, now)
-
-
 def pass_now(no, admin_id, now):
     """Pass a just-opened proposal on an admin's word, without a vote
-    (admins.py), and return it. A setting change is applied, as at close;
-    anything else is carried out by whatever carries out a passed vote.
-    Checking that `admin_id` is an admin is the caller's job."""
+    (admins.py), and return it. Carrying it out is ending.py's job, and
+    checking that `admin_id` is an admin is the caller's."""
     data = _load()
     proposal = data["proposals"][str(no)]
     if proposal["status"] != OPEN:
         raise Refused("Voting on this proposal has closed.")
     proposal.update(status=PASSED, shipped_by=admin_id, closes_at=now, closed_at=now,
                     totals={"yes": 0, "no": 0}, votes={})
-    _apply(proposal)
     _save(data)
     return proposal
 
@@ -207,11 +159,16 @@ def fit_quorum(no, members):
 
 
 def attach_message(no, channel_id, message_id):
+    return record(no, channel_id=channel_id, message_id=message_id)
+
+
+def record(no, **fields):
+    """Keep `fields` on proposal `no`, and return it."""
     data = _load()
     proposal = data["proposals"][str(no)]
-    proposal["channel_id"] = channel_id
-    proposal["message_id"] = message_id
+    proposal.update(fields)
     _save(data)
+    return proposal
 
 
 def founder(joined_at, founded_at):
@@ -269,8 +226,8 @@ def due(now):
 
 
 def close(no, now):
-    """Count the votes, destroy the ballots, apply a passed setting change, and
-    return the closed proposal."""
+    """Count the votes, destroy the ballots, and return the closed proposal.
+    Carrying out the result is ending.py's job."""
     data = _load()
     proposal = data["proposals"][str(no)]
     if proposal["status"] != OPEN:
@@ -282,15 +239,6 @@ def close(no, now):
         closed_at=now,
         votes={},
     )
-    _apply(proposal)
     _save(data)
     return proposal
 
-
-def _apply(proposal):
-    """Apply a passed setting change."""
-    if proposal["status"] == PASSED and proposal["kind"] == SETTING:
-        try:
-            settings.apply(proposal["setting"], proposal["value"])
-        except ValueError as e:
-            proposal["note"] = f"Passed, but could not be applied: {e}."

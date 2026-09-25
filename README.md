@@ -237,7 +237,9 @@ a time. The list is in `colors.py`, so changing it is a proposal.
 
 A proposal runs by the settings in force when it opened. Ballots are
 secret: the card shows only the totals, you can change your vote until it
-closes, and who voted which way is deleted when it does. Anyone can
+closes, and who voted which way is deleted when it does. When it closes,
+the bot carries out the result, then updates the card and says under it
+how the vote went and what came of it. Anyone can
 propose; only members who have been in the server long enough can vote.
 Leaving and rejoining restarts that clock.
 
@@ -320,7 +322,9 @@ current dials, run `calibrate.py` (see [Running it](#running-it)).
   still stands, which covers a banned member whose DMs are closed, and
   anyone who thinks a call was unfair.
 - **Once per case.** Each case can be appealed once. The appeal counts
-  towards the appellant's limit of open proposals.
+  towards the appellant's limit of open proposals. If an admin withdraws
+  the appeal, it doesn't count: the case can be appealed again, and its
+  `#mod-log` entry says so.
 - **The vote.** An appeal is a proposal in `#proposals` showing the case,
   the moderator's explanation, the message (unless it was private
   information, sexual content or a scam) and the appellant's reason. It is
@@ -381,7 +385,7 @@ Each proposal is attempted once. To try again, propose it again.
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
 | `admins.py` | The admins the owner picks, `/admin` (protected) |
 | `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
-| `actions.py` | Everything a vote can order, checked and carried out by code |
+| `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
 | `guard.py` | Keeps every role cosmetic (protected) |
 | `colors.py` | The name colors, the `#roles` picker and `/color` |
@@ -392,12 +396,16 @@ Each proposal is attempted once. To try again, propose it again.
 | `layout.py` | Builds and repairs the server; knows where each channel is |
 | `conduct.py` | The rules of conduct and the `#welcome` text |
 | `settings.py` | The votable settings and their fixed ranges |
-| `proposals.py`, `voting_ui.py` | Proposals, ballots and closing; their Discord side |
+| `proposals.py`, `voting_ui.py` | Proposals and ballots, the same for every kind; their commands and vote buttons |
+| `kinds.py` | What differs between kinds of proposal, each in its own module |
+| `code_changes.py`, `setting_changes.py` | General proposals and setting changes, as kinds of proposal |
+| `ending.py` | Every way a proposal ends: its vote closes, or an admin passes or withdraws it |
+| `cards.py` | How a proposal looks in `#proposals`: its card and its result |
 | `automod.py` | The AutoMod rules and watch lists |
 | `judge.py` | The questions, routing, verdicts and sanction ladder; no Discord |
 | `moderator.py` | Handles AutoMod alerts, applies sanctions, posts cases; `/ai-key` |
 | `cases.py` | Numbered moderation cases and each member's record |
-| `appeals.py` | `/appeal`, the Appeal button, and carrying out a vote's result |
+| `appeals.py` | `/appeal`, the Appeal button, and the appeal kind of proposal |
 | `ai.py` | The OpenRouter key, the two model calls, and the monthly budget (protected) |
 | `providers.py` | One interface over OpenRouter, Claude, Gemini and Grok |
 | `store.py` | Saves state as JSON files on the volume (protected) |

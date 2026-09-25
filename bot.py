@@ -22,12 +22,14 @@ import actions  # noqa: E402  (store.py reads its directory from the environment
 import admins  # noqa: E402
 import appeals  # noqa: E402
 import chat  # noqa: E402
+import code_changes  # noqa: E402, F401  (each kind of proposal registers itself: kinds.py)
 import colors  # noqa: E402
 import guard  # noqa: E402
 import health  # noqa: E402
 import layout  # noqa: E402
 import moderator  # noqa: E402
 import quick  # noqa: E402
+import setting_changes  # noqa: E402, F401
 import updates  # noqa: E402
 import voting_ui  # noqa: E402
 
@@ -65,7 +67,6 @@ class Bot(discord.Client):
         moderator.setup(self.tree)
         appeals.setup(self, self.tree)
         colors.setup(self, self.tree)
-        actions.setup()
         chat.setup(self)
         quick.setup(self)
         updates.setup(self)

@@ -17,13 +17,13 @@ import discord
 
 import actions
 import automod
+import cards
 import conduct
 import guard
 import layout
 import proposals
 import quick
 import store
-import voting_ui
 
 NOW = 1_800_000_000
 OWNER, BOT, MEMBER = 1, 2, 7
@@ -144,13 +144,13 @@ class People(WithTempData):
                 g, {"kind": actions.BAN, "member": str(who), "reason": "x"}))
 
     def test_a_vote_about_a_member_is_blind_they_cant_vote_and_the_bar_is_higher(self):
-        p = proposals.open_action(8, {"kind": actions.BAN, "member": str(MEMBER)},
-                                  "Ban Tony", "Details", NOW, about=MEMBER)
+        p = actions.KIND.open(8, {"kind": actions.BAN, "member": str(MEMBER),
+                                  "member_name": "Tony", "reason": "Spam"}, NOW)
         self.assertEqual((p["excluded"], p["blind"], p["pass_percent"]), ([MEMBER], True, 66))
         with self.assertRaisesRegex(proposals.Refused, "own case"):
             proposals.cast(p["no"], MEMBER, 0, "no", NOW + 1)
         proposals.cast(p["no"], 9, 0, "yes", NOW + 1)
-        votes = voting_ui.card(proposals.get(p["no"])).fields[2].value
+        votes = cards.card(proposals.get(p["no"])).fields[2].value
         self.assertIn("1 voted so far", votes)
         self.assertNotIn("1 yes", votes)
 

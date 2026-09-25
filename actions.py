@@ -1,4 +1,5 @@
-"""Changes a vote can order, carried out by code when it passes.
+"""Changes a vote can order, carried out by code when it passes. A
+proposal to make one is the server-change kind of proposal (kinds.py).
 
 Each change is checked twice: when it is drafted, so members only ever vote
 on something that can actually be done, and again when it is carried out,
@@ -23,10 +24,10 @@ import discord
 
 import automod
 import conduct
+import kinds
 import layout
 import proposals
 import store
-import voting_ui
 
 log = logging.getLogger("actions")
 
@@ -566,20 +567,35 @@ async def _carry_out_member(guild, a):
     return f"Done: {a['member_name']} is removed from the server."
 
 
-async def settle(client, p):
-    """Carry out a passed change. Registered in voting_ui.AFTER_CLOSE."""
-    if p["kind"] != proposals.ACTION or p["status"] != proposals.PASSED:
-        return
-    guild = client.get_guild(layout.home_id() or 0)
-    try:
-        said = await carry_out(guild, {**p["action"], "by_admin": bool(p.get("shipped_by"))})
-    except (discord.HTTPException, OSError) as e:
-        said = f"It couldn't be done: {getattr(e, 'status', '') or e.__class__.__name__}."
-    log.info(f"proposal {p['no']}: {said}")
-    await voting_ui.reply_to(client, p, said)
-    await layout.server_log(guild, f"Proposal {p['no']} ({p['title']}): {said}")
-    return said
+class ServerChange(kinds.Kind):
+    """A proposal to make one of the changes above."""
+
+    def open(self, author_id, action, now):
+        """Open a vote on `action`, already checked. A vote about a member
+        (ABOUT_A_MEMBER) hides its count, they can't vote on it, and it
+        needs `removal_percent` to pass."""
+        title, details = describe(action)
+        if action["kind"] in ABOUT_A_MEMBER:
+            return proposals.file(author_id, proposals.ACTION, title, details, now,
+                                  excluded=[int(action["member"])], blind=True,
+                                  bar="removal_percent", action=action)
+        return proposals.file(author_id, proposals.ACTION, title, details, now,
+                              action=action)
+
+    def open_draft(self, author_id, draft, now):
+        return self.open(author_id, draft["payload"], now)
+
+    async def carry_out(self, client, guild, p):
+        if guild is None:
+            return "It couldn't be done: the bot can't see the server."
+        try:
+            said = await carry_out(guild, {**p["action"],
+                                           "by_admin": bool(p.get("shipped_by"))})
+        except (discord.HTTPException, OSError) as e:
+            said = f"It couldn't be done: {getattr(e, 'status', '') or e.__class__.__name__}."
+        log.info(f"proposal {p['no']}: {said}")
+        await layout.server_log(guild, f"Proposal {p['no']} ({p['title']}): {said}")
+        return said
 
 
-def setup():
-    voting_ui.AFTER_CLOSE.append(settle)
+KIND = kinds.register(proposals.ACTION, ServerChange())

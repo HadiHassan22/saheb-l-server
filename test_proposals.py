@@ -8,7 +8,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import code_changes
 import proposals
+import setting_changes
 import settings
 import store
 
@@ -28,7 +30,7 @@ class WithTempData(unittest.TestCase):
         shutil.rmtree(self._tmp)
 
     def general(self, author=1, now=NOW):
-        return proposals.open_proposal(author, " Title ", " Details ", now)
+        return code_changes.KIND.open(author, " Title ", " Details ", now)
 
     def vote(self, no, votes, now=NOW + 60):
         """votes: {voter_id: "yes" | "no"}"""
@@ -82,10 +84,10 @@ class Opening(WithTempData):
 
     def test_setting_proposal_is_checked_and_described(self):
         with self.assertRaisesRegex(proposals.Refused, "between 3 and 100"):
-            proposals.open_proposal(1, "", "", NOW, setting="quorum", value=1)
+            setting_changes.KIND.open(1, "quorum", 1, "", NOW)
         with self.assertRaisesRegex(proposals.Refused, "already"):
-            proposals.open_proposal(1, "", "", NOW, setting="quorum", value=5)
-        p = proposals.open_proposal(1, "", "too slow", NOW, setting="voting_hours", value=48)
+            setting_changes.KIND.open(1, "quorum", 5, "", NOW)
+        p = setting_changes.KIND.open(1, "voting_hours", 48, "too slow", NOW)
         self.assertEqual(p["title"], "Voting window: 48 hours")
         self.assertIn("from 24 hours to 48 hours", p["details"])
         self.assertIn("too slow", p["details"])
@@ -128,7 +130,7 @@ class Voting(WithTempData):
 
 
 class Admins(WithTempData):
-    def test_an_admin_passes_a_proposal_at_once_and_a_setting_applies(self):
+    def test_an_admin_passes_a_proposal_at_once(self):
         p = proposals.pass_now(self.general()["no"], 7, NOW)
         self.assertEqual((p["status"], p["shipped_by"], p["totals"]),
                          (proposals.PASSED, 7, {"yes": 0, "no": 0}))
@@ -137,9 +139,6 @@ class Admins(WithTempData):
             proposals.cast(p["no"], 10, VETERAN, "no", NOW)
         with self.assertRaisesRegex(proposals.Refused, "has closed"):
             proposals.pass_now(p["no"], 7, NOW)
-        s = proposals.open_proposal(1, "", "", NOW, setting="quorum", value=8)
-        proposals.pass_now(s["no"], 7, NOW)
-        self.assertEqual(settings.current()["quorum"], 8)
 
     def test_an_admin_withdraws_an_open_proposal_and_nothing_is_counted(self):
         p = self.general()
@@ -196,16 +195,11 @@ class Closing(WithTempData):
         self.assertEqual(proposals.due(NOW + 2 * DAY), [])
         self.assertEqual(proposals.close(1, NOW + 2 * DAY)["closed_at"], NOW + DAY)
 
-    def test_passed_setting_change_is_applied_and_failed_one_is_not(self):
-        proposals.open_proposal(1, "", "", NOW, setting="voting_hours", value=48)
-        proposals.open_proposal(2, "", "", NOW, setting="quorum", value=10)
+    def test_closing_carries_nothing_out(self):
+        setting_changes.KIND.open(1, "voting_hours", 48, "", NOW)
         self.vote(1, {v: "yes" for v in range(10, 15)})
-        self.vote(2, {v: "no" for v in range(10, 15)})
-        proposals.close(1, NOW + DAY)
-        proposals.close(2, NOW + DAY)
-        self.assertEqual(settings.current()["voting_hours"], 48)
-        self.assertEqual(settings.current()["quorum"], 5)
-
+        self.assertEqual(proposals.close(1, NOW + DAY)["status"], proposals.PASSED)
+        self.assertEqual(settings.current()["voting_hours"], 24)  # ending.py applies it
 
 if __name__ == "__main__":
     unittest.main()

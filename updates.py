@@ -32,10 +32,10 @@ from discord import app_commands
 from discord.ext import tasks
 
 import admins
+import cards
 import health
 import proposals
 import store
-import voting_ui
 
 log = logging.getLogger("updates")
 
@@ -123,7 +123,7 @@ def running_proposal():
 
 
 async def _say(client, no, text):
-    await voting_ui.reply_to(client, proposals.get(no), text)
+    await cards.reply(client, proposals.get(no), text)
 
 
 async def _pull_requests():

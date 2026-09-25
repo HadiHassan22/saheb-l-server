@@ -21,11 +21,14 @@ import actions
 import admins
 import ai
 import assistant
+import cards
 import chat
+import code_changes
 import colors
 import layout
 import proposals
 import providers
+import setting_changes
 import settings
 import store
 import voting_ui
@@ -279,36 +282,36 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
 class Shipping(WithTempData, unittest.IsolatedAsyncioTestCase):
     """voting_ui.ship: an admin's request from #ask-saheb, done at once."""
 
-    async def ship(self, opener, hooks=()):
+    async def ship(self, opener, done="Done."):
         message = types.SimpleNamespace(id=70, jump_url="https://discord.com/x",
-                                        create_thread=mock.AsyncMock())
+                                        create_thread=mock.AsyncMock(), edit=mock.AsyncMock(),
+                                        reply=mock.AsyncMock())
         channel = types.SimpleNamespace(id=6, send=mock.AsyncMock(return_value=message))
         logged = mock.AsyncMock()
         with mock.patch.object(layout, "channel", lambda g, name: channel), \
                 mock.patch.object(layout, "server_log", logged), \
                 mock.patch.object(layout, "post_texts", mock.AsyncMock()), \
-                mock.patch.object(voting_ui, "AFTER_CLOSE", list(hooks)):
+                mock.patch.object(actions, "carry_out", mock.AsyncMock(return_value=done)):
             p, said = await voting_ui.ship(None, object(), opener, 7)
         return p, said, channel, logged
 
     async def test_it_passes_posts_logs_and_says_what_was_done(self):
         action = {"kind": actions.TOPIC, "channel": "cars", "topic": "Vroom"}
-        done = mock.AsyncMock(return_value="Done: <#2> has its new topic.")
         p, said, channel, logged = await self.ship(
-            lambda now: proposals.open_action(7, action, "Topic", "Vroom", now), [done])
+            lambda now: actions.KIND.open(7, action, now), "Done: <#2> has its new topic.")
         self.assertEqual((p["status"], p["shipped_by"]), (proposals.PASSED, 7))
         self.assertEqual(proposals.get(p["no"])["message_id"], 70)
         channel.send.assert_awaited_once()
-        self.assertIn("<@7> passed proposal", logged.call_args.args[1])
+        self.assertIn("<@7> passed proposal", logged.call_args_list[0].args[1])
         self.assertEqual(said, "Done: <#2> has its new topic.")
 
     async def test_a_setting_or_code_change_says_what_happens_next(self):
-        _, said, _, _ = await self.ship(lambda now: proposals.open_proposal(
-            7, "", "", now, setting="quorum", value=8))
+        _, said, _, _ = await self.ship(
+            lambda now: setting_changes.KIND.open(7, "quorum", 8, "", now))
         self.assertIn("is now at least 8 votes", said)
         self.assertEqual(settings.current()["quorum"], 8)
-        _, said, _, _ = await self.ship(lambda now: proposals.open_proposal(
-            7, "Trivia", "A trivia game.", now))
+        _, said, _, _ = await self.ship(
+            lambda now: code_changes.KIND.open(7, "Trivia", "A trivia game.", now))
         self.assertIn("code change", said)
 
     async def test_a_refused_opener_opens_nothing(self):
@@ -505,17 +508,18 @@ class Admins(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Only the member", sent[0])
         publish.assert_not_awaited()
         await self.ship(setting["no"], 7)
-        self.assertEqual(settings.current()["quorum"], 8)
+        p = proposals.get(assistant.get_draft(setting["no"])["filed"])
+        self.assertEqual((p["setting"], p["value"], p["shipped_by"]), ("quorum", 8, 7))
 
     def test_a_card_says_which_admin_passed_or_withdrew_it(self):
-        p = proposals.pass_now(proposals.open_proposal(7, "Dark mode", "Add it.", NOW)["no"],
+        p = proposals.pass_now(code_changes.KIND.open(7, "Dark mode", "Add it.", NOW)["no"],
                                7, NOW)
-        embed = voting_ui.card(p)
+        embed = cards.card(p)
         self.assertIn("Passed by an admin", embed.fields[-1].value)
         self.assertIn("still goes through every automatic check", embed.footer.text)
-        q = proposals.withdraw(proposals.open_proposal(8, "Spam", "Spam.", NOW)["no"],
+        q = proposals.withdraw(code_changes.KIND.open(8, "Spam", "Spam.", NOW)["no"],
                                7, "Off topic", NOW)
-        embed = voting_ui.card(q)
+        embed = cards.card(q)
         self.assertIn("Withdrawn by an admin", embed.fields[-2].value)
         self.assertEqual(embed.fields[-1].value, "Off topic")
 
@@ -537,15 +541,13 @@ class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.guild.create_text_channel = mock.AsyncMock(return_value=made)
         action = {"kind": actions.CREATE, "name": "anime", "category": "Hangout"}
         await actions.check(self.guild, action)
-        client = types.SimpleNamespace(get_guild=lambda gid: self.guild)
         p = {"kind": proposals.ACTION, "status": proposals.PASSED, "no": 3, "action": action,
              "title": "Create the channel anime"}
-        with mock.patch("voting_ui.reply_to", mock.AsyncMock()) as said, \
-                mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
-            await actions.settle(client, p)
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            said = await actions.KIND.carry_out(None, self.guild, p)
         self.assertIn("Proposal 3", logged.call_args.args[1])
         self.guild.create_text_channel.assert_awaited_once()
-        self.assertIn("<#50> is open", said.call_args.args[2])
+        self.assertIn("<#50> is open", said)
 
     async def test_a_deleted_planned_channel_is_not_rebuilt(self):
         store.save("layout", {"guild_id": 99, "channels": {"cars": 2}, "messages": {}})
@@ -554,11 +556,6 @@ class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("deleted", said)
         saved = store.load("layout", {})
         self.assertEqual((saved["channels"], saved["removed"]), ({}, ["cars"]))
-
-    async def test_failed_votes_change_nothing(self):
-        with mock.patch.object(actions, "carry_out", mock.AsyncMock()) as carry:
-            await actions.settle(None, {"kind": proposals.ACTION, "status": proposals.FAILED})
-        carry.assert_not_awaited()
 
 
 if __name__ == "__main__":
