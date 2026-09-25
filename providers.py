@@ -551,15 +551,24 @@ class Claude:
             reply.text = "I would rather not answer that one."
         return reply
 
-    async def json_answer(self, model, prompt, schema, max_tokens=300):
+    async def json_answer(self, model, prompt, schema, max_tokens=300,
+                          effort=None):
+        """Without an effort, thinking is off (short, cheap answers). With
+        one, the model thinks as hard as the effort says: Opus 5.5 can't
+        switch thinking off at all, and refuses a request that tries."""
+        output_config = {
+            "format": {"type": "json_schema", "schema": _closed(schema)}
+        }
+        extra = {"thinking": {"type": "disabled"}}
+        if effort:
+            output_config["effort"] = effort
+            extra = {}
         message = await self._send(
             model=model,
             max_tokens=max_tokens,
-            thinking={"type": "disabled"},
             messages=[{"role": "user", "content": prompt}],
-            output_config={
-                "format": {"type": "json_schema", "schema": _closed(schema)}
-            },
+            output_config=output_config,
+            **extra,
         )
         usage = message.usage
         text = "".join(

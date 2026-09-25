@@ -66,7 +66,8 @@ async def review(proposal, diff):
     client = providers.Claude(os.environ["ANTHROPIC_API_KEY"])
     answer, _, _ = await client.json_answer(
         os.environ.get("REVIEWER_MODEL", "claude-opus-5-5"), prompt(proposal, diff),
-        SCHEMA, max_tokens=2000)
+        # Thinking shares max_tokens with the answer, hence the room.
+        SCHEMA, max_tokens=16000, effort="high")
     problems = [str(p) for p in answer.get("problems") or []]
     approved = bool(answer.get("approve")) and not problems
     if not answer:

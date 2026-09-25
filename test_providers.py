@@ -3,7 +3,9 @@
     python -m unittest
 """
 
+import asyncio
 import unittest
+from types import SimpleNamespace
 
 import providers
 
@@ -105,6 +107,26 @@ class Transcripts(unittest.TestCase):
         self.assertEqual([m["role"] for m in messages[1:]],
                          ["user", "assistant", "tool", "tool", "assistant"])
         self.assertIs(messages[2], raw)
+
+    def test_claude_json_answer_thinks_only_when_given_an_effort(self):
+        claude = providers.Claude.__new__(providers.Claude)
+        sent = []
+
+        async def send(**payload):
+            sent.append(payload)
+            text = SimpleNamespace(type="text", text='{"approve": true}')
+            usage = SimpleNamespace(input_tokens=1, output_tokens=1)
+            return SimpleNamespace(content=[text], usage=usage)
+
+        claude._send = send
+        schema = {"type": "object", "properties": {"approve": {"type": "boolean"}}}
+        asyncio.run(claude.json_answer("claude-haiku-4-5", "p", schema))
+        asyncio.run(claude.json_answer("claude-opus-5-5", "p", schema, effort="high"))
+        self.assertEqual(sent[0]["thinking"], {"type": "disabled"})
+        self.assertNotIn("effort", sent[0]["output_config"])
+        # Opus 5.5 refuses any request that switches thinking off.
+        self.assertNotIn("thinking", sent[1])
+        self.assertEqual(sent[1]["output_config"]["effort"], "high")
 
 
 class SystemPrompt(unittest.TestCase):
