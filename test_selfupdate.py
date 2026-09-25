@@ -5,20 +5,27 @@ workflow. No network.
     python -m unittest
 """
 
+import asyncio
 import copy
 import importlib.util
 import shutil
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
 
+import discord
+
+import admins
 import code_changes
 import health
+import layout
 import proposals
 import setting_changes
 import store
 import updates
+import workflow
 
 HERE = Path(__file__).parent
 _spec = importlib.util.spec_from_file_location(
@@ -55,6 +62,14 @@ class ProtectedPaths(unittest.TestCase):
         found = protected.admin_problems(diff)
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0].startswith("chat.py: touches the list of admins"))
+
+    def test_the_github_token_is_protected(self):
+        self.assertEqual(protected.path_problems(["workflow.py"]),
+                         ["changes a protected file: workflow.py"])
+        diff = ('+++ b/updates.py\n+t = workflow._token()\n'
+                "+t = store.load('github', {})\n+p = store.DATA_DIR / 'github.json'\n"
+                "+await workflow.start()\n+data = await workflow.get('pulls')\n")
+        self.assertEqual(len(protected.access_problems(diff)), 3)
 
     def test_code_that_could_link_members_to_github_is_refused(self):
         diff = ("+++ b/updates.py\n+    text = pr['html_url']\n"
@@ -208,7 +223,7 @@ class Stages(unittest.TestCase):
         self.assertLessEqual(len(updates.summary_of({"body": "x" * 5000})), 1501)
 
 
-class WithTempData(unittest.TestCase):
+class WithTempData(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self._saved_dir = store.DATA_DIR
         self._tmp = tempfile.mkdtemp()
@@ -241,6 +256,168 @@ class Progress(WithTempData):
             self.assertIsNone(updates.running_proposal())
 
 
+def run(id, status="completed", conclusion="success", event="schedule"):
+    return {"id": id, "run_number": id, "status": status, "conclusion": conclusion,
+            "event": event, "html_url": f"https://github.com/o/r/actions/runs/{id}"}
+
+
+class Runs(unittest.TestCase):
+    def test_the_first_look_announces_nothing(self):
+        seen = {}
+        self.assertEqual(updates.run_news([run(2, conclusion="failure"), run(1)], seen), [])
+        self.assertEqual(updates.run_news([run(2, conclusion="failure"), run(1)], seen), [])
+
+    def test_runs_someone_started_are_announced_and_the_timers_are_not(self):
+        seen = {}
+        updates.run_news([run(1)], seen)
+        news = updates.run_news([run(3, "in_progress", None, "workflow_dispatch"),
+                                 run(2, "in_progress", None), run(1)], seen)
+        self.assertEqual(len(news), 1)
+        self.assertIn("running (run 3", news[0])
+        self.assertEqual(updates.run_news([run(3, "in_progress", None, "workflow_dispatch"),
+                                           run(1)], seen), [])
+
+    def test_a_string_of_failures_is_announced_once_and_so_is_the_recovery(self):
+        seen = {}
+        updates.run_news([run(1)], seen)
+        runs = [run(1)]
+        said = []
+        for id, conclusion in ((2, "failure"), (3, "timed_out"), (4, "cancelled"),
+                               (5, "success"), (6, "success")):
+            runs.insert(0, run(id, conclusion=conclusion))
+            said += updates.run_news(runs, seen)
+        self.assertEqual(len(said), 2)
+        self.assertIn("failed (run 2", said[0])
+        self.assertIn("works again (run 5", said[1])
+
+    def test_a_run_finishing_after_a_newer_one_is_still_seen(self):
+        seen = {}
+        updates.run_news([run(1)], seen)
+        updates.run_news([run(3, conclusion="cancelled"), run(2, "in_progress", None)], seen)
+        news = updates.run_news([run(3, conclusion="cancelled"),
+                                 run(2, conclusion="failure")], seen)
+        self.assertEqual(len(news), 1)
+        self.assertIn("failed (run 2", news[0])
+
+
+class Starting(WithTempData):
+    def setUp(self):
+        super().setUp()
+        updates._last.update(at=0.0, refused=None)
+        self.told = []
+        patcher = mock.patch.object(admins, "post", self.post)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def post(self, guild, text):
+        self.told.append(text)
+        return True
+
+    async def test_without_a_token_the_admins_are_told_once(self):
+        guild = object()
+        self.assertFalse(await updates.start(guild, "proposal 3"))
+        self.assertFalse(await updates.start(guild, "proposal 4"))
+        self.assertEqual(len(self.told), 1)
+        self.assertIn("proposal 3", self.told[0])
+        self.assertIn("/github-key", self.told[0])
+
+    async def test_a_start_is_reported_and_clears_the_last_refusal(self):
+        with mock.patch.object(workflow, "start", mock.AsyncMock(
+                side_effect=[workflow.Refused("GitHub answered 500"), None, None])):
+            await updates.start(None, "proposal 1")
+            self.assertTrue(await updates.start(object(), "proposal 2"))
+            self.assertEqual(self.told, ["Started the self-update workflow for proposal 2."])
+            self.assertIsNone(updates._last["refused"])
+
+    async def test_a_passed_code_change_starts_the_workflow(self):
+        started = mock.AsyncMock()
+        with mock.patch.object(updates, "start", started):
+            said = await code_changes.KIND.carry_out(None, "guild", {"no": 8})
+            await asyncio.gather(*updates._tasks)
+        started.assert_awaited_once_with("guild", "proposal 8")
+        self.assertIn("written as a code change", said)
+
+
+class Reading(WithTempData):
+    class Session:
+        """Answers GETs from `statuses` in turn, noting each call's headers."""
+        def __init__(self, statuses):
+            self.statuses, self.headers = list(statuses), []
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            self.headers.append(headers)
+            status = self.statuses.pop(0)
+            response = mock.MagicMock(status=status)
+            response.json = mock.AsyncMock(return_value={"ok": status})
+            response.__aenter__ = mock.AsyncMock(return_value=response)
+            response.__aexit__ = mock.AsyncMock(return_value=False)
+            return response
+
+    async def test_a_token_github_refuses_falls_back_to_the_public_api(self):
+        store.save("github", {"token": "secret"}, private=True)
+        session = self.Session([401, 200])
+        with mock.patch.object(workflow.aiohttp, "ClientSession", lambda **kw: session):
+            self.assertEqual(await workflow.get("pulls"), {"ok": 200})
+        self.assertIn("Authorization", session.headers[0])
+        self.assertNotIn("Authorization", session.headers[1])
+
+    async def test_without_a_token_reads_are_public_and_failures_say_why(self):
+        session = self.Session([403])
+        with mock.patch.object(workflow.aiohttp, "ClientSession", lambda **kw: session):
+            with self.assertRaisesRegex(workflow.Refused, "Actions: read and write"):
+                await workflow.get("pulls")
+        self.assertEqual(len(session.headers), 1)
+        self.assertNotIn("Authorization", session.headers[0])
+
+
+class AdminLog(WithTempData):
+    OWNER, ADMIN, MEMBER = 1, 2, 3
+
+    def setUp(self):
+        super().setUp()
+        self.people = {i: discord.Object(id=i)
+                       for i in (self.OWNER, self.ADMIN, self.MEMBER)}
+        self.guild = types.SimpleNamespace(owner_id=self.OWNER, default_role="everyone",
+                                           get_member=self.people.get)
+        self.channel = mock.Mock(spec=discord.TextChannel)
+        self.channel.overwrites = {"everyone": discord.PermissionOverwrite(),
+                                   self.people[self.MEMBER]: discord.PermissionOverwrite(
+                                       view_channel=True)}
+        self.channel.edit = mock.AsyncMock()
+        self.channel.send = mock.AsyncMock()
+        patcher = mock.patch.object(layout, "channel", lambda guild, name: self.channel)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        admins.add(self.ADMIN)
+
+    async def test_only_the_admins_and_the_owner_can_read_it(self):
+        self.assertTrue(await admins.post(self.guild, "Run 4 failed."))
+        wanted = self.channel.edit.await_args.kwargs["overwrites"]
+        self.assertFalse(wanted["everyone"].view_channel)
+        readers = {target.id for target, o in wanted.items()
+                   if target != "everyone" and o.view_channel}
+        self.assertEqual(readers, {self.OWNER, self.ADMIN})
+        self.channel.send.assert_awaited_once()
+
+    async def test_nothing_is_posted_if_it_cant_be_kept_private(self):
+        self.channel.edit.side_effect = discord.HTTPException(mock.Mock(status=403), "no")
+        self.assertFalse(await admins.post(self.guild, "Run 4 failed."))
+        self.channel.send.assert_not_awaited()
+
+    async def test_it_is_left_alone_when_already_right(self):
+        await admins.post(self.guild, "one")
+        self.channel.overwrites = self.channel.edit.await_args.kwargs["overwrites"]
+        self.channel.edit.reset_mock()
+        await admins.post(self.guild, "two")
+        self.channel.edit.assert_not_awaited()
+
+
 class Passed(WithTempData):
     def test_only_passed_general_proposals_are_offered_oldest_first(self):
         for n in range(4):
@@ -253,6 +430,14 @@ class Passed(WithTempData):
         self.assertEqual([p["no"] for p in health.passed_proposals()], [1, 3])
         self.assertEqual(health.passed_proposals()[0],
                          {"no": 1, "title": "Idea 0", "details": "Do it.", "shipped": False})
+
+    def test_waiting_is_what_passed_and_has_no_pull_request_yet(self):
+        for n in range(3):
+            proposals.pass_now(code_changes.KIND.open(7, f"Idea {n}", "Do it.", NOW)["no"],
+                               7, NOW)
+        updates.advance(1, updates.FAILED)
+        updates.advance(2, updates.WRITING)
+        self.assertEqual(updates.waiting(), [3])
 
     def test_a_change_an_admin_shipped_is_offered_at_once(self):
         proposals.pass_now(code_changes.KIND.open(7, "Dark mode", "Add it.", NOW)["no"],

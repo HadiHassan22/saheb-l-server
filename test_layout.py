@@ -18,7 +18,7 @@ import store
 
 ROOMS = [spec for _, channels in layout.PLAN for spec in channels]
 NEEDED = ("welcome", "rules", "roles", "mod-log", "proposals", "general",
-          "automod-alerts", "AFK")
+          "automod-alerts", "admin-log", "AFK")
 
 
 class Plan(unittest.TestCase):
@@ -46,6 +46,7 @@ class Plan(unittest.TestCase):
         for name in ("welcome", "rules", "roles", "mod-log"):
             self.assertEqual(by_name[name]["kind"], layout.READ_ONLY)
         self.assertEqual(by_name["automod-alerts"]["kind"], layout.HIDDEN)
+        self.assertEqual(by_name["admin-log"]["kind"], layout.HIDDEN)
 
     def test_the_plan_fits_discords_limits(self):
         self.assertLessEqual(len(ROOMS) + len(layout.PLAN), 500)

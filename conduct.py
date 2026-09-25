@@ -67,7 +67,7 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 
 **The owner.** Discord requires a human owner, so {owner_mention} holds that role. The owner keeps the bot online, pays for its AI and picks the admins, and has the same powers as an admin (below). Otherwise the owner is a member with one vote like everyone else.
 
-**Admins.** Members the owner picks (they have the Admin role; see `/admin list`) look after the server while it's young. They can do anything a vote can, at once and without a vote: change channels, roles, settings and the rules, kick or ban, or have the bot's code changed. They can also take down any open proposal. They act only through the bot, never with Discord's own tools, and everything they do is posted in #server-log with who did it.
+**Admins.** Members the owner picks (they have the Admin role; see `/admin list`) look after the server while it's young. They can do anything a vote can, at once and without a vote: change channels, roles, settings and the rules, kick or ban, or have the bot's code changed. They can also take down any open proposal. They act only through the bot, never with Discord's own tools, and everything they do is posted in #server-log with who did it. They also read #admin-log, where the bot reports how code changes are going, with links to the code.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod passes it messages with flagged words in English or Arabic, and it reads the conversation around each one and decides whether to do nothing, warn, delete the message, time the member out, or ban them for severe or repeated violations. Every action is posted in {mod_log_mention} with the reasoning.
 

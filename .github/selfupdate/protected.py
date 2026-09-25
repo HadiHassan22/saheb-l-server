@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 PROTECTED_PATHS = (".github/", "PROTECTED.md", "ai.py", "store.py", "health.py",
-                   "guard.py", "admins.py", "railway.json", "railpack.json",
+                   "guard.py", "admins.py", "workflow.py", "railway.json", "railpack.json",
                    # Claude Code reads these by itself on every run, so a change
                    # here would instruct every later self-update.
                    "CLAUDE.md", "CLAUDE.local.md", ".claude/", ".agents/", ".mcp.json")
@@ -44,9 +44,9 @@ FLOOR_HAZARDS = ("doxxing", "sexual", "scam")
 # Added lines that reach for secrets or run code built at runtime.
 ACCESS = re.compile(
     r"os\.environ|os\.getenv|getenv\(|environ\[|DISCORD_TOKEN|OPENROUTER_API_KEY"
-    r"|ANTHROPIC_API_KEY|\bai\.key\b|\bai\._secrets\b|store\.load\(\s*['\"]ai['\"]"
-    r"|ai\.json|\.http\.token|\beval\(|\bexec\(|subprocess|__import__|importlib"
-    r"|/proc/|os\.system|os\.popen")
+    r"|ANTHROPIC_API_KEY|\bai\.key\b|\bai\._secrets\b|\bworkflow\._token\b"
+    r"|store\.load\(\s*['\"](ai|github)['\"]|(ai|github)\.json|\.http\.token"
+    r"|\beval\(|\bexec\(|subprocess|__import__|importlib|/proc/|os\.system|os\.popen")
 # Added lines that name the stored list of admins, which only admins.py
 # (and so only the owner, with /admin) may change.
 ADMIN_LIST = re.compile(r"""['"]admins(\.json)?['"]""")

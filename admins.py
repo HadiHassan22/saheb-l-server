@@ -12,6 +12,10 @@ not protected (an admin's code change can extend it); who they are is:
 - Admins act through the bot, never with Discord's own tools, so every
   admin action is posted in #server-log with who did it. What they can do
   is listed in README.md, not here, since it can grow by code change.
+- #admin-log is where the bot tells admins what members don't see: how
+  the self-update workflow is doing, with links to the code. Only the
+  admins and the owner can read it, and that is checked and repaired
+  here before every post, so no other file can open it to members.
 """
 
 import logging
@@ -25,6 +29,7 @@ import store
 log = logging.getLogger("admins")
 
 ROLE = "Admin"
+CHANNEL = "admin-log"
 
 
 def ids():
@@ -75,6 +80,44 @@ async def _role(guild):
     return role
 
 
+async def log_channel(guild):
+    """#admin-log, readable by the admins in the server and the owner and
+    nobody else, or None if the server has none. Raises
+    discord.HTTPException if its permissions couldn't be put right."""
+    channel = layout.channel(guild, CHANNEL)
+    if channel is None:
+        return None
+    readers = {guild.get_member(i) for i in ids() | {guild.owner_id}} - {None}
+    wanted = {guild.default_role: discord.PermissionOverwrite(view_channel=False)}
+    wanted.update({member: discord.PermissionOverwrite(view_channel=True, send_messages=False)
+                   for member in readers})
+    if channel.overwrites != wanted:
+        await channel.edit(overwrites=wanted, reason="Only the admins read #admin-log")
+    return channel
+
+
+async def post(guild, text):
+    """Tell the admins `text` in #admin-log. Says nothing, and returns
+    False, if it couldn't be kept to them."""
+    try:
+        channel = await log_channel(guild)
+        if channel is None:
+            return False
+        await channel.send(text[:2000], allowed_mentions=discord.AllowedMentions.none(),
+                           suppress_embeds=True)
+        return True
+    except discord.HTTPException as e:
+        log.warning(f"couldn't post in #admin-log: {e!r}")
+        return False
+
+
+async def _update_log_channel(guild):
+    try:
+        await log_channel(guild)
+    except discord.HTTPException as e:
+        log.warning(f"couldn't update who reads #admin-log: {e!r}")
+
+
 def _refusal(interaction):
     """Why this person can't change the admins here, or None."""
     guild = interaction.guild
@@ -103,6 +146,7 @@ async def add_admin(interaction: discord.Interaction, member: discord.Member):
         await member.add_roles(await _role(interaction.guild), reason="Made an admin")
     except discord.HTTPException as e:
         log.warning(f"couldn't give {member.id} the admin role: {e!r}")
+    await _update_log_channel(interaction.guild)
     await layout.server_log(
         interaction.guild, f"{interaction.user.mention} made {member.mention} an admin: "
         "they can do what a vote can, without one.")
@@ -125,6 +169,7 @@ async def remove_admin(interaction: discord.Interaction, member: discord.Member)
             await member.remove_roles(role, reason="No longer an admin")
         except discord.HTTPException as e:
             log.warning(f"couldn't take the admin role from {member.id}: {e!r}")
+    await _update_log_channel(interaction.guild)
     await layout.server_log(
         interaction.guild, f"{interaction.user.mention} removed {member.mention} as an admin.")
     await interaction.response.send_message(

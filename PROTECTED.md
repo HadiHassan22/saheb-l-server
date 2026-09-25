@@ -15,7 +15,8 @@ in the repository's history.
 | `ai.py`, `store.py` | Where the AI key is kept and how it is used, and how private files are written. |
 | `health.py` | The health check. Rollback relies on it to tell whether a new version came up. |
 | `guard.py` | Takes moderation-level permissions off every role and channel override, the Admin role included, so nobody can act on the server except through the bot, which logs it. |
-| `admins.py` | Who the admins are, and that only the owner picks them. No other file may touch the stored list of admins either. |
+| `admins.py` | Who the admins are, and that only the owner picks them. No other file may touch the stored list of admins either. It also keeps `#admin-log` readable by the admins and the owner alone, checked before every post. |
+| `workflow.py` | The GitHub token the owner gives with `/github-key`, which lets the bot start the self-update workflow. No other file may read it. |
 | `railway.json`, `railpack.json` | How the bot is deployed and health-checked. |
 | `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `.agents/`, `.mcp.json` | Claude Code reads these by itself on every self-update run. A change here would instruct every later run. |
 
@@ -60,10 +61,11 @@ protected channels; the safety floor and rules 4 to 6 hold for everyone.
   own GitHub account, and linking to it from the server would identify
   them. No message, embed or answer members can see may contain a GitHub
   link; admins can ask for it with `/admin github`, which only they see.
-  Members still get every status and summary, without the link.
+  Members still get every status and summary, without the link. Admins
+  get links in `#admin-log`, which only they and the owner can read.
 
 - Read, print, store or send any key or token: the Discord token, the AI
-  key, or any other secret. New code may not read environment variables
+  key, the GitHub token, or any other secret. New code may not read environment variables
   at all.
 - Run code it builds at runtime (`eval`, `exec`, `subprocess`, dynamic
   imports).

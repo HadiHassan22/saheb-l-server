@@ -57,7 +57,7 @@ KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
 ABOUT_A_MEMBER = (KICK, BAN)
 
 CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-saheb",
-        "automod-alerts", "AFK"}
+        "automod-alerts", "admin-log", "AFK"}
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
 MAX_CHANNELS, MAX_ROLES, MAX_RULES = 450, 100, 20

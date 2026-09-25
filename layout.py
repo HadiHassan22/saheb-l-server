@@ -97,6 +97,9 @@ PLAN = [
         room("automod-alerts", HIDDEN,
              "AutoMod's alerts to the moderator. Hidden to keep flagged messages "
              "private; every action taken is in #mod-log."),
+        # Who can read it is admins.py's job, not the plan's.
+        room("admin-log", HIDDEN,
+             "For the admins and the owner: how code changes are going, with links."),
     ]),
 ]
 

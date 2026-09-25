@@ -12,9 +12,18 @@ outcome as a pull request:
 - a merged `revert-proposal-N`: the new version didn't come up, so it was
   rolled back.
 
-The bot reads these from GitHub's public API every five minutes, with no
-key: the repository is public. When the commit it is running is a
-proposal's, it says that proposal is live.
+The bot reads these from GitHub every five minutes (workflow.py, with the
+owner's token if there is one, else the public API). When the commit it is
+running is a proposal's, it says that proposal is live.
+
+It also starts the workflow itself (workflow.py) as soon as a general
+proposal passes, and again whenever one is still waiting and no run is
+going: the workflow does one proposal per run, and GitHub's own timer for
+it can go an hour without running.
+
+The admins get more, in #admin-log (admins.py), which only they and the
+owner can read: each stage with its pull request, every start of the
+workflow, and the runs that fail, with links.
 
 Members get the status and the summary written for them, never a link:
 the repository is under the owner's own GitHub account, and linking it
@@ -22,11 +31,11 @@ from the server would tie the two together. Admins can ask for the link
 with /admin github, which only they see.
 """
 
+import asyncio
 import logging
-import os
 import re
+import time
 
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import tasks
@@ -34,16 +43,14 @@ from discord.ext import tasks
 import admins
 import cards
 import health
+import layout
 import proposals
 import store
+import workflow
 
 log = logging.getLogger("updates")
 
-# Railway names the repository it deploys from; the fallback is for
-# running locally.
-REPO = (f"{os.environ.get('RAILWAY_GIT_REPO_OWNER') or 'HadiHassan22'}/"
-        f"{os.environ.get('RAILWAY_GIT_REPO_NAME') or 'saheb-l-server'}")
-PULLS = f"https://api.github.com/repos/{REPO}/pulls"
+REPO = workflow.REPO
 
 WRITING, NO_CHANGE, FAILED, MERGED, LIVE, ROLLED_BACK = (
     "writing", "no change", "failed", "merged", "live", "rolled back")
@@ -126,24 +133,105 @@ async def _say(client, no, text):
     await cards.reply(client, proposals.get(no), text)
 
 
-async def _pull_requests():
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
-        async with session.get(PULLS, params={"state": "all", "per_page": "100",
-                                              "sort": "updated", "direction": "desc"},
-                               headers={"Accept": "application/vnd.github+json"}) as r:
-            if r.status != 200:
-                raise RuntimeError(f"GitHub answered {r.status}")
-            return await r.json()
+async def _tell_admins(guild, text):
+    if guild is not None:
+        await admins.post(guild, text)
+
+
+def waiting():
+    """Passed general proposals the workflow hasn't taken up yet."""
+    stages = _saved()["stages"]
+    return [p["no"] for p in health.passed_proposals() if str(p["no"]) not in stages]
+
+
+FAILED_RUN = ("failure", "timed_out", "startup_failure")
+
+
+def run_news(runs, seen):
+    """What to tell the admins about the workflow's `runs`, newest first as
+    GitHub lists them. `seen` records what was already said, and is
+    updated. A run someone started (the bot, or an admin by hand) is
+    announced when it starts; the timer's runs, which mostly find nothing
+    to do, aren't. A string of failed runs is announced once, and so is the
+    first success after it. The first time, nothing is announced."""
+    first = "done" not in seen
+    seen.setdefault("done", [])
+    seen.setdefault("started", [])
+    seen.setdefault("failing", False)
+    news = []
+    for run in reversed(runs):
+        where = f"run {run['run_number']}: <{run['html_url']}>"
+        if run["status"] != "completed":
+            if run["id"] not in seen["started"]:
+                seen["started"].append(run["id"])
+                if run["event"] == "workflow_dispatch" and not first:
+                    news.append(f"The self-update workflow is running ({where})")
+            continue
+        if run["id"] in seen["done"]:
+            continue
+        seen["done"].append(run["id"])
+        if first:
+            continue
+        if run["conclusion"] in FAILED_RUN and not seen["failing"]:
+            seen["failing"] = True
+            news.append(f"The self-update workflow failed ({where})")
+        elif run["conclusion"] == "success" and seen["failing"]:
+            seen["failing"] = False
+            news.append(f"The self-update workflow works again ({where})")
+    seen["done"], seen["started"] = seen["done"][-100:], seen["started"][-100:]
+    return news
+
+
+_last = {"at": 0.0, "refused": None}
+# Starting again for proposals still waiting: not more often than this.
+RETRY_EVERY = 15 * 60
+_tasks = set()
+
+
+async def start(guild, why):
+    """Ask GitHub to run the workflow now, and tell the admins how it went.
+    The timer is the backup, so a refusal only delays; the same refusal
+    twice in a row is said once."""
+    _last["at"] = time.time()
+    try:
+        await workflow.start()
+    except workflow.Refused as e:
+        log.warning(f"couldn't start the self-update workflow: {e}")
+        if _last["refused"] != str(e):
+            _last["refused"] = str(e)
+            await _tell_admins(guild, f"Couldn't start the self-update workflow for {why}: "
+                                      f"{e}. GitHub's timer will start it, within the hour "
+                                      "usually.")
+        return False
+    _last["refused"] = None
+    await _tell_admins(guild, f"Started the self-update workflow for {why}.")
+    return True
+
+
+def start_soon(guild, no):
+    """Start the workflow for proposal `no`, which just passed, without
+    holding up the rest of its ending."""
+    async def run():
+        try:
+            await start(guild, f"proposal {no}")
+        except Exception as e:
+            log.error(f"starting the workflow for proposal {no} failed: {e!r}")
+    task = asyncio.create_task(run())
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
 
 
 @tasks.loop(minutes=5)
 async def follow(client):
     await client.wait_until_ready()
+    guild = client.get_guild(layout.home_id() or 0)
     try:
         live = running_proposal()
         if live is not None and advance(live, LIVE):
             await _say(client, live, message(live, LIVE))
-        for pr in reversed(await _pull_requests()):
+            await _tell_admins(guild, message(live, LIVE))
+        for pr in reversed(await workflow.get("pulls", {
+                "state": "all", "per_page": "100", "sort": "updated", "direction": "desc"})):
             no = proposal_of(pr)
             stage = stage_of(pr)
             if no is None or stage is None:
@@ -153,8 +241,19 @@ async def follow(client):
                 continue
             if advance(no, stage, pr):
                 await _say(client, no, message(no, stage, summary_of(pr)))
+                await _tell_admins(guild, f"{message(no, stage)}\n<{pr['html_url']}>")
+        runs = (await workflow.get(f"actions/workflows/{workflow.WORKFLOW}/runs",
+                                   {"per_page": "20"}))["workflow_runs"]
+        saved = _saved()
+        for text in run_news(runs, saved.setdefault("runs", {})):
+            await _tell_admins(guild, text)
+        store.save("updates", saved)
+        going = any(run["status"] != "completed" for run in runs)
+        if (waiting() and not going and workflow.configured()
+                and time.time() - _last["at"] >= RETRY_EVERY):
+            await start(guild, "the proposals still waiting")
     except Exception as e:
-        # GitHub limits unauthenticated calls; the next round tries again.
+        # GitHub limits calls without a token; the next round tries again.
         log.warning(f"could not follow updates: {e!r}")
 
 

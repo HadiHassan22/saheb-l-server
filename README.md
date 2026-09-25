@@ -31,7 +31,8 @@ settings or the rules, kicking or banning, or having the bot's code
 changed. Deleting a channel or category waits for them to confirm. They
 can also take down any open proposal. They act only through the bot,
 never with Discord's own tools, and everything they do is posted in
-#server-log with who did it.
+#server-log with who did it. They also read #admin-log, where the bot
+reports how code changes are going, with links to the code.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
 passes it messages with flagged words in English or Arabic, and it reads
@@ -103,7 +104,7 @@ this, adopting Discord's default `#general` and General voice channel:
 | Lebanon | `#lebanon-news`, `#politics-and-religion` (30-second slowmode), `#diaspora` |
 | Interests | `#food`, `#pets`, `#gaming`, `#music`, `#sports`, `#movies-and-tv`, `#tech`, `#cars`, `#study-and-work` |
 | Voice | General, Ahwe, Lounge, Gaming 1, Gaming 2, Study Room, AFK |
-| Bot | `#automod-alerts`: hidden, AutoMod's alerts to the moderator |
+| Bot | `#automod-alerts`: hidden, AutoMod's alerts to the moderator; `#admin-log`: only the admins and the owner can read it |
 
 It also sets the server's verification level to medium, scans media from
 all members for explicit content, sets notifications to mentions only, and
@@ -343,8 +344,11 @@ current dials, run `calibrate.py` (see [Running it](#running-it)).
 ## Self-updating
 
 When a proposal passes, [a GitHub workflow](.github/workflows/self-update.yml)
-puts it into effect with no human in the loop. Every ten minutes it looks
-for passed proposals that haven't been handled, and for the oldest one:
+puts it into effect with no human in the loop. The bot starts it at once
+(with the token the owner gave it, `/github-key`), and again whenever a
+passed proposal is still waiting and no run is going; GitHub also starts
+it every ten minutes, when it gets round to it. Each run takes the oldest
+passed proposal that hasn't been handled:
 
 1. **Claude Code writes the change** (Sonnet 5) on a branch named
    `proposal-N`. It can read and edit files and nothing else: no shell,
@@ -371,9 +375,12 @@ for passed proposals that haven't been handled, and for the oldest one:
    minutes for `/healthz` to report the new commit; if it doesn't, it
    reverts the change.
 
-The bot follows each proposal through GitHub's public API and replies
-under its card in `#proposals`: deploying, live, needs no change, failed,
-or rolled back.
+The bot follows each proposal through GitHub's API and replies under its
+card in `#proposals`: deploying, live, needs no change, failed, or rolled
+back. `#admin-log` gets the same with a link to the pull request, plus
+each time the bot starts the workflow (or couldn't), runs it started, and
+runs that fail. Only the admins and the owner can read it: the bot checks
+that before every post.
 
 Each proposal is attempted once. To try again, propose it again.
 
@@ -383,14 +390,15 @@ Each proposal is attempted once. To try again, propose it again.
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
-| `admins.py` | The admins the owner picks, `/admin` (protected) |
+| `admins.py` | The admins the owner picks, `/admin`, and who reads `#admin-log` (protected) |
 | `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
 | `guard.py` | Keeps every role cosmetic (protected) |
 | `colors.py` | The name colors, the `#roles` picker and `/color` |
 | `health.py` | `/healthz` and `/api/passed`, which the update system relies on (protected) |
-| `updates.py` | Follows passed proposals through GitHub and reports in `#proposals` |
+| `updates.py` | Follows passed proposals through GitHub, starts the workflow, and reports in `#proposals` and `#admin-log` |
+| `workflow.py` | The GitHub token, `/github-key`, and starting the workflow (protected) |
 | `PROTECTED.md` | What votes can't change (protected) |
 | `.github/` | The self-update workflow, its protected-core check and security review (protected) |
 | `layout.py` | Builds and repairs the server; knows where each channel is |
@@ -431,6 +439,9 @@ Each proposal is attempted once. To try again, propose it again.
    AutoMod's blocks still work.
 5. **Turn on self-updating** (see [Hosting](#hosting-on-railway)). Until
    then, passed proposals are recorded but not put into effect.
+6. **As the server owner, run `/github-key`** with a GitHub token (see
+   below), so the bot can start the workflow as soon as a proposal passes.
+   Without it, proposals wait for GitHub's timer.
 
 ```sh
 python3 -m venv .venv
@@ -466,4 +477,13 @@ To turn on self-updating, in the GitHub repository's settings:
   write and review.
 - **Actions, then General:** allow GitHub Actions to create pull requests.
 - **The repository must stay public:** the bot reads pull requests through
-  GitHub's public API, with no key.
+  GitHub's public API when its token can't.
+
+The token for `/github-key`: in GitHub, Settings, Developer settings,
+Fine-grained tokens, generate one with an expiry, **Only select
+repositories** (this one), and under repository permissions only
+**Actions: Read and write**. The bot checks it by starting the workflow
+once, keeps it in a file only it can read, and says in `#admin-log` if
+GitHub stops accepting it. Anyone holding it could only start, read or
+cancel the workflow's runs, and a run only acts on proposals the bot
+lists as passed.

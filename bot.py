@@ -32,6 +32,7 @@ import quick  # noqa: E402
 import setting_changes  # noqa: E402, F401
 import updates  # noqa: E402
 import voting_ui  # noqa: E402
+import workflow  # noqa: E402
 
 log = logging.getLogger("bot")
 
@@ -65,6 +66,7 @@ class Bot(discord.Client):
         voting_ui.setup(self, self.tree)
         admins.setup(self.tree)
         moderator.setup(self.tree)
+        workflow.setup(self.tree)
         appeals.setup(self, self.tree)
         colors.setup(self, self.tree)
         chat.setup(self)
@@ -97,6 +99,7 @@ class Bot(discord.Client):
                 await other.leave()
         try:
             await layout.build(home)
+            await admins.log_channel(home)
             await guard.sweep(home, self.report)
         except discord.HTTPException as e:
             # Commands are still worth syncing; the next start retries the rest.
