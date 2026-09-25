@@ -51,13 +51,15 @@ first server it joins as home (leaving any other), calls each module's
   gathers context and applies the sanction `judge.py` picks. The bot never
   reads unflagged messages.
 - **#ask-saheb:** `chat.py` handles messages (only when tagged or replied
-  to); `assistant.py` defines the tools and their fixed tiers (look,
-  personal, light, draft); `quick.py` does the instant ones.
+  to); `assistant.py` defines the tools and their tiers (look, personal,
+  light, draft, and admin-only tools); `quick.py` does the instant ones.
+  The bot does whatever an admin asks.
 - **AI:** everything goes through one OpenRouter key; `ai.py` holds the
   models and budget, `providers.py` the provider interface.
 - **Server shape:** `layout.py` builds and repairs channels and roles;
-  `colors.py` name colors; `guard.py` strips moderation powers from every
-  role, so roles stay cosmetic.
+  `colors.py` name colors; `pickers.py` the other pickers in #roles (data,
+  made by vote); `guard.py` strips moderation powers from every role but
+  Admin, so roles stay cosmetic.
 - **State:** `store.py`, JSON files in `data/` or the Railway volume.
   Things are stored by id, not name.
 - **Self-update:** `.github/workflows/self-update.yml` runs
@@ -82,8 +84,11 @@ first server it joins as home (leaving any other), calls each module's
   contain a link to the repository; `updates.summary_of` strips them and
   the protected-core check refuses added lines with `github.com` or
   `html_url`.
-- **Roles never carry power.** Anything that lets a member act on others
-  goes through a vote or an admin, via the bot.
+- **Roles never carry power, except Admin.** Anything that lets a member
+  act on others goes through a vote or an admin. The Admin role has
+  Discord's powers; `admins.py` keeps it on the admins alone and posts
+  what they do with it in #server-log. A role may open a channel to its
+  holders (seeing a channel isn't power).
 - **Discord limits:** anything shown in Discord must fit (embed and
   message lengths, at most 25 command choices, name lengths); tests check
   these, so add such checks for new text.

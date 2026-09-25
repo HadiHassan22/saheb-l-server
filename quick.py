@@ -19,6 +19,7 @@ from discord.ext import tasks
 
 import actions
 import layout
+import pickers
 import store
 
 BEIRUT = ZoneInfo("Asia/Beirut")
@@ -83,8 +84,14 @@ async def join_role(member, name, join=True):
     if role is None or not roles[role.id]["joinable"]:
         raise Refused("That isn't a role members can join. Ask me to list the roles.")
     if join:
+        # A picker where members pick one: joining one of its roles leaves the others.
+        others = {r for p in pickers.holding(role.id) if p["one"] for r in p["roles"]} - {role.id}
+        left = [r for r in member.roles if r.id in others] if others else []
+        if left:
+            await member.remove_roles(*left, reason="Picked another in its picker")
         await member.add_roles(role, reason="Joined by asking")
-        return f"You're in {role.name}."
+        return f"You're in {role.name}." + (
+            f" You've left {', '.join(r.name for r in left)}." if left else "")
     await member.remove_roles(role, reason="Left by asking")
     return f"You've left {role.name}."
 

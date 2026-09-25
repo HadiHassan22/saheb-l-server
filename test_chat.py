@@ -145,9 +145,15 @@ class System(unittest.TestCase):
 
 class Tiers(unittest.TestCase):
     def test_every_tool_has_a_tier_and_a_handler(self):
-        names = [tool["name"] for tool in assistant.TOOLS]
+        names = [tool["name"] for tool in assistant.TOOLS + assistant.ADMIN_TOOLS]
         self.assertEqual(set(names), set(assistant.TIER))
         self.assertEqual(set(names), set(assistant._TOOLS))
+
+    def test_admin_tools_are_only_for_admins(self):
+        admin_only = {t["name"] for t in assistant.ADMIN_TOOLS}
+        self.assertEqual(admin_only, {n for n, t in assistant.TIER.items()
+                                      if t == assistant.ADMIN})
+        self.assertFalse(admin_only & {t["name"] for t in assistant.TOOLS})
 
     def test_what_happens_without_a_vote_is_exactly_this(self):
         def tier(t):

@@ -1,12 +1,13 @@
-"""No member holds power over another. PROTECTED: see PROTECTED.md.
+"""No member holds power over another, except the admins. PROTECTED: see
+PROTECTED.md.
 
 Roles here are cosmetic: a color, an interest, something to be pinged
 for. This takes every permission that would let a member act on others or
 on the server away from every role and every channel override, however it
 got there: a vote, a code change, or someone with the owner's account.
-The bot's own role, which Discord manages, is the only one left with them.
-The Admin role is stripped like any other: admins (admins.py) act through
-the bot, which posts what they do in #server-log.
+Two roles keep them: the bot's own, which Discord manages, and the Admin
+role, which admins.py keeps on the admins alone. What admins do with it is
+posted in #server-log (admins.on_audit_log_entry).
 
 It runs when the bot starts, every hour, and whenever a role or channel
 changes. The owner's own powers come from owning the server, not from a
@@ -20,6 +21,7 @@ import logging
 import discord
 from discord.ext import tasks
 
+import admins
 import store
 
 log = logging.getLogger("guard")
@@ -75,8 +77,9 @@ def stripped_overwrite(overwrite):
 async def sweep(guild, report=None):
     """Take powers off every role and channel override. `report(text)` is
     told what was taken, so it can be said publicly."""
+    admin_role = admins.role_id()
     for role in guild.roles:
-        if role.managed:
+        if role.managed or role.id == admin_role:
             continue
         if role >= guild.me.top_role:
             # Only the owner can make a role the bot can't edit. Say so,
@@ -98,7 +101,8 @@ async def sweep(guild, report=None):
                              "roles here are cosmetic, and nobody holds power over others.")
     for channel in guild.channels:
         for target, overwrite in list(channel.overwrites.items()):
-            if target == guild.me or getattr(target, "managed", False):
+            if (target == guild.me or getattr(target, "managed", False)
+                    or getattr(target, "id", None) == admin_role):
                 continue
             new = stripped_overwrite(overwrite)
             if new is not None:
@@ -107,6 +111,11 @@ async def sweep(guild, report=None):
                 if report:
                     await report(f"Removed moderation permissions for {target.name} in "
                                  f"#{channel.name}: nobody holds power over others.")
+    await admins.keep(guild, report or _quiet)
+
+
+async def _quiet(text):
+    pass
 
 
 _pending = set()

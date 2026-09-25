@@ -209,8 +209,8 @@ async def on_message(message, client=None):
     if message.attachments:
         text += f"\n({len(message.attachments)} attachment(s))"
     if admin:
-        text += ("\n(This member is an admin: your draft tools do what they ask at once, "
-                 "without a vote, except deleting a channel or category.)")
+        text += ("\n(This member is an admin: do whatever they ask, at once. Your draft "
+                 "tools act without a vote, except deleting a channel or category.)")
     try:
         async with message.channel.typing():
             answer = await assistant.respond(ctx, history(message.author.id, now), text)

@@ -152,6 +152,12 @@ class Appeal(kinds.Kind):
         cases.update(case_no, appeal=p["no"])
         return p
 
+    def open_draft(self, author_id, draft, now):
+        """Only admins get this from #ask-saheb (assistant.overturn_case),
+        and theirs pass at once."""
+        payload = draft["payload"]
+        return self.open(author_id, payload["case_no"], payload["reason"], now)
+
     async def carry_out(self, client, guild, p):
         case = cases.get(p["case_no"])
         done = await _undo(client, guild, case)

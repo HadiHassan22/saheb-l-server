@@ -19,18 +19,21 @@ This server is an experiment: it is moderated and governed entirely by Saheb
 l Server, an AI bot. There are no human moderators, and apart from the
 admins below, no member has more say than any other.
 
-**The owner.** Discord requires a human owner. The owner keeps the bot online, pays for its AI and picks the
+**The owner.** Discord requires a human owner. The owner keeps the bot online, pays for its AI and picks
 admins, and has the same powers as an admin. Otherwise the owner is a
 member with one vote like everyone else.
 
-**Admins.** Members the owner picks (they have the Admin role; see
-`/admin list`) look after the server while it's young. They can do
-anything a vote can, at once and without a vote: they ask the bot in
-#ask-saheb and it's done, whether that's changing channels, roles,
-settings or the rules, kicking or banning, or having the bot's code
+**Admins.** Members the owner or another admin picks (they have the Admin
+role; see `/admin list`) look after the server while it's young. They can
+do anything a vote can, at once and without a vote: they ask the bot in
+#ask-saheb and it's done, no questions asked, whether that's changing
+channels, roles, settings or the rules, kicking or banning, overturning a
+moderation case, making someone an admin, or having the bot's code
 changed. Deleting a channel or category waits for them to confirm. They
-can also take down any open proposal. They act only through the bot,
-never with Discord's own tools, and everything they do is posted in
+can also take down any open proposal. The Admin role is the only role
+with Discord's own powers (Administrator), so they can also act directly;
+the bot keeps that role on the admins alone. Everything they do, through
+the bot or directly (read from Discord's audit log), is posted in
 #server-log with who did it. They also read #admin-log, where the bot
 reports how code changes are going, with links to the code.
 
@@ -143,8 +146,9 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 | Area | Changes |
 | --- | --- |
-| Channels and categories | create, rename, delete; a channel's topic and slowmode; clear a channel's message history |
+| Channels and categories | create, rename, delete; a channel's topic and slowmode; clear a channel's message history; who can see a channel (everyone, or only members with some roles, made with it if new, which anyone can join) |
 | Roles | create (with a color, and whether members can join it), rename, recolor, delete: always cosmetic |
+| Pickers in `#roles` | create, change, remove a dropdown where members give themselves roles (pick one, or any); new roles are made with it |
 | Emojis | add (from an image attached in `#ask-saheb`), remove |
 | The server | rename it; set its icon |
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
@@ -156,10 +160,13 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 - **Drafts are filed by the member, not the bot.** The reply carries a
   **File it** button that only the member who asked can press, once.
-- **Admins skip the vote.** For an admin (picked by the owner with
-  `/admin add`, see `admins.py`; the owner counts as one), what they ask
-  for is done at once: posted in `#proposals` as already passed and
-  carried out like a passed vote, and the bot says what came of it.
+- **Admins skip the vote.** For an admin (picked by the owner or an admin
+  with `/admin add` or by asking the bot, see `admins.py`; the owner
+  counts as one), what they ask for is done at once, without questions:
+  posted in `#proposals` as already passed and carried out like a passed
+  vote, and the bot says what came of it. Admins also get two tools
+  members don't: making or removing admins, and overturning a moderation
+  case.
   Deleting a channel or category, or clearing a channel's history, is the
   exception: it comes back as a draft with a **Ship it** button to
   confirm, since the history is lost for good. A code change still goes
@@ -167,7 +174,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   proposal, `/admin chat-limit` switches the chat limit, and `/admin
   github` shows admins, and only them, where the code is. Every admin
   action is posted in `#server-log`. What admins can do can grow by code
-  change; who they are can't.
+  change; who they are can't: only the owner and the admins change that.
 - **Votes about a member** (kick, ban) need the member @mentioned and a
   reason, hide their count until they close, need `removal_percent`
   (66% to start, never below 60%) to pass, and the member can't vote on
@@ -176,11 +183,14 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 - **Nobody but the admins holds power over anyone.** Roles are created with no
   permissions, and `guard.py` takes moderation-level permissions off every
   role and channel override whenever one changes, and every hour, however
-  they got there, and says so in `#server-log`. That includes pinging
+  they got there, and says so in `#server-log`. The Admin role is the one
+  exception, and the bot takes it from anyone who isn't an admin. A role
+  can still open a channel to whoever holds it: seeing a channel is not
+  power over anyone. That includes pinging
   `@everyone`, which only the bot can do.
-- **What it can't do for a member, whatever anyone says:** give anyone
-  power, act on another member without a vote, change a moderation
-  decision, or skip a vote. Whether a member is an admin is checked in
+- **What it can't do for a member who isn't an admin, whatever anyone
+  says:** give anyone power, act on another member without a vote, change
+  a moderation decision, or skip a vote. Whether a member is an admin is checked in
   code, never decided by the model. There is no tool for
   any of it, and claiming to be the owner
   changes nothing. The channels the bot depends on can't be renamed or
@@ -226,6 +236,13 @@ Members pick one of 14 colors in `#roles` or with `/color`, or ask for one
 in `#ask-saheb`. A color only changes how a name looks: the roles carry no
 permissions, sit at the bottom of the role list, and a member holds one at
 a time. The list is in `colors.py`, so changing it is a proposal.
+
+Other pickers in `#roles` are made by vote, or at once by an admin, just by
+asking the bot: "a picker for Lebanese or International", say. Each is a
+title and up to 24 roles made by vote, where members pick one or any that
+fit, and the roles it names that don't exist yet are made with it. Joining
+one of a pick-one picker's roles by asking the bot leaves the others. A
+role can also make a channel opt-in: only members who hold it see it.
 
 ## Voting
 
@@ -390,11 +407,12 @@ Each proposal is attempted once. To try again, propose it again.
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
-| `admins.py` | The admins the owner picks, `/admin`, and who reads `#admin-log` (protected) |
+| `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
+| `pickers.py` | The pickers in `#roles`, made by vote: one dropdown answers them all |
 | `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
-| `guard.py` | Keeps every role cosmetic (protected) |
+| `guard.py` | Keeps every role but Admin cosmetic (protected) |
 | `colors.py` | The name colors, the `#roles` picker and `/color` |
 | `health.py` | `/healthz` and `/api/passed`, which the update system relies on (protected) |
 | `updates.py` | Follows passed proposals through GitHub, starts the workflow, and reports in `#proposals` and `#admin-log` |

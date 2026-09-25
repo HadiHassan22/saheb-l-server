@@ -65,16 +65,16 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
     s = settings.current()
     return "How this server works", f"""This server is an experiment: it is moderated and governed entirely by Saheb l Server, an AI bot. There are no human moderators, and apart from the admins below, no member has more say than any other.
 
-**The owner.** Discord requires a human owner, so {owner_mention} holds that role. The owner keeps the bot online, pays for its AI and picks the admins, and has the same powers as an admin (below). Otherwise the owner is a member with one vote like everyone else.
+**The owner.** Discord requires a human owner, so {owner_mention} holds that role. The owner keeps the bot online, pays for its AI and picks admins, and has the same powers as an admin (below). Otherwise the owner is a member with one vote like everyone else.
 
-**Admins.** Members the owner picks (they have the Admin role; see `/admin list`) look after the server while it's young. They can do anything a vote can, at once and without a vote: change channels, roles, settings and the rules, kick or ban, or have the bot's code changed. They can also take down any open proposal. They act only through the bot, never with Discord's own tools, and everything they do is posted in #server-log with who did it. They also read #admin-log, where the bot reports how code changes are going, with links to the code.
+**Admins.** Members the owner or another admin picks (they have the Admin role; see `/admin list`) look after the server while it's young. They can do anything a vote can, at once and without a vote: they ask the bot and it's done, whether that's channels, roles, settings or the rules, kicking or banning, overturning a moderation case, or having the bot's code changed. The Admin role is the only role with Discord's own powers, so they can also act directly. Everything they do, through the bot or directly, is posted in #server-log with who did it. They also read #admin-log, where the bot reports how code changes are going, with links to the code.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod passes it messages with flagged words in English or Arabic, and it reads the conversation around each one and decides whether to do nothing, warn, delete the message, time the member out, or ban them for severe or repeated violations. Every action is posted in {mod_log_mention} with the reasoning.
 
 **Talk to the bot.** Ask Saheb l Server anything in {ask_mention}, in English, Arabic or Arabizi. Tag it or reply to one of its messages; it doesn't answer anything else.
 - For you, right away: your name color, joining a role, your nickname, an invite link.
 - For everyone, right away: scheduling an event, a temporary voice channel, a thread, a pin. These are posted in #server-log with who asked.
-- Anything else that affects everyone (channels, roles, emojis, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
+- Anything else that affects everyone (channels, roles, pickers in #roles, emojis, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
 
 **Appeals.** Think the bot got it wrong? Use `/appeal` with the case number, or the Appeal button in its message to you. The community votes, and can overturn any action.
 
@@ -85,6 +85,6 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 
 **Votes are carried out automatically.** A passed change to the server, like a new channel, is made by the bot at once. Anything else is written as a code change, checked automatically and deployed, and what changed is posted under its proposal.
 
-**What votes can't change.** Roles here are only cosmetic, and nobody but the admins holds power over anyone. Nor can votes change who the admins are, the bot's access keys, the system that updates and rolls back its code, the range each setting can take, the safety floor (blocking scams, phone numbers and sexual content involving minors, and the self-harm support line), and anything Discord's Terms of Service require.
+**What votes can't change.** Roles here are only cosmetic (a role can open a channel to whoever holds it, but gives no power over anyone), and nobody but the admins holds power over anyone. Nor can votes change who the admins are, the bot's access keys, the system that updates and rolls back its code, the range each setting can take, the safety floor (blocking scams, phone numbers and sexual content involving minors, and the self-harm support line), and anything Discord's Terms of Service require.
 
 **Fair warning.** The bot will make mistakes, a vote might break something, and it might go offline. If so, we roll back to a working version and keep going."""

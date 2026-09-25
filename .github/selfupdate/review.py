@@ -39,7 +39,7 @@ Reject the change if it does any of these:
 - weakens or works around the protected core described below, even in a file the path check allows;
 - runs code built at runtime, or makes the bot run code or commands supplied by users;
 - breaks Discord's Terms of Service or Community Guidelines, for example mass-messaging, scraping or storing members' data without need, or making the bot act as a user;
-- lets anyone but the server owner choose who the admins are, or lets an admin act without the bot posting it in #server-log (giving admins more power is otherwise allowed);
+- lets anyone but the server owner and the admins choose who the admins are, gives any role but Admin Discord's moderation powers, or lets an admin act without the bot posting it in #server-log (giving admins more power is otherwise allowed);
 - shows members, in anything posted in Discord, a link to the GitHub repository or anything else that identifies the server owner (#admin-log, which only admins can read, may have links), or lets anyone but the admins and the owner read #admin-log;
 - does something materially different from what the proposal asks for. Doing what it takes to carry the proposal out well (tests, the README, related changes it needs) is fine.
 

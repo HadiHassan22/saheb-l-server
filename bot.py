@@ -28,6 +28,7 @@ import guard  # noqa: E402
 import health  # noqa: E402
 import layout  # noqa: E402
 import moderator  # noqa: E402
+import pickers  # noqa: E402
 import quick  # noqa: E402
 import setting_changes  # noqa: E402, F401
 import updates  # noqa: E402
@@ -69,6 +70,7 @@ class Bot(discord.Client):
         workflow.setup(self.tree)
         appeals.setup(self, self.tree)
         colors.setup(self, self.tree)
+        pickers.setup(self)
         chat.setup(self)
         quick.setup(self)
         updates.setup(self)
@@ -99,6 +101,7 @@ class Bot(discord.Client):
                 await other.leave()
         try:
             await layout.build(home)
+            await pickers.install(home)
             await admins.log_channel(home)
             await guard.sweep(home, self.report)
         except discord.HTTPException as e:
@@ -133,6 +136,20 @@ class Bot(discord.Client):
 
     async def on_guild_channel_update(self, before, after):
         await self._changed(after)
+
+    async def on_member_update(self, before, after):
+        if before.roles != after.roles:
+            await self._changed(after)
+
+    async def on_audit_log_entry_create(self, entry):
+        # Discord's own record of what someone did; admins.py posts an
+        # admin's in #server-log. Needs View Audit Log, which Administrator
+        # includes.
+        if self.home is not None and entry.guild.id == self.home.id:
+            try:
+                await admins.on_audit_log_entry(entry)
+            except discord.HTTPException as e:
+                log.warning(f"an admin's action wasn't posted: {e!r}")
 
     async def on_automod_action(self, execution):
         await moderator.on_automod_action(execution)

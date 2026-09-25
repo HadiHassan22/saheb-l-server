@@ -7,11 +7,13 @@ because the server may have changed during the vote. Things are named by
 their current name when drafting and remembered by id after that.
 
 Limits that hold whatever a vote says:
-- the channels the bot depends on can't be renamed, deleted or purged, so the
-  moderation and admin logs, and the record of every admin action, can't be
-  wiped by a vote or an admin acting alone;
+- the channels the bot depends on can't be renamed, deleted, purged or
+  hidden, so the moderation and admin logs, and the record of every admin
+  action, can't be wiped by a vote or an admin acting alone;
 - roles are cosmetic: they are created with no permissions, and guard.py
-  takes away any that appear later;
+  takes away any that appear later. A role can still open a channel to
+  whoever holds it (set_channel_access): seeing a channel is not a power
+  over anyone;
 - rules 4 to 6 and the original rules can't be removed (conduct.py), and
   only watch words change, never what AutoMod blocks (automod.py);
 - a vote about a member (kick, ban) needs `removal_percent`, hides its
@@ -28,6 +30,7 @@ import automod
 import conduct
 import kinds
 import layout
+import pickers
 import proposals
 import store
 
@@ -36,6 +39,7 @@ log = logging.getLogger("actions")
 CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE = (
     "create_channel", "rename_channel", "delete_channel", "set_topic", "set_slowmode",
     "purge_channel")
+ACCESS = "set_channel_access"  # who can see a channel: everyone, or the holders of some roles
 CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE = (
     "create_category", "rename_category", "delete_category")
 ROLE_CREATE, ROLE_EDIT, ROLE_DELETE = "create_role", "edit_role", "delete_role"
@@ -45,8 +49,9 @@ RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
+PICKER_CREATE, PICKER_EDIT, PICKER_DELETE = "create_picker", "edit_picker", "delete_picker"
 
-CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE,
+CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE, ACCESS,
                  CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE)
 ROLE_KINDS = (ROLE_CREATE, ROLE_EDIT, ROLE_DELETE)
 EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
@@ -54,8 +59,9 @@ SERVER_KINDS = (SERVER_NAME, SERVER_ICON)
 RULE_KINDS = (RULE_EDIT, RULE_ADD, RULE_REMOVE)
 WATCH_KINDS = (WATCH_ADD, WATCH_REMOVE)
 PEOPLE_KINDS = (KICK, BAN, UNBAN)
+PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
-         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS)
+         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
@@ -149,6 +155,8 @@ async def check(guild, action):
         return _check_watch(action)
     if kind == EVENT_CANCEL:
         return _check_event(guild, action)
+    if kind in PICKER_KINDS:
+        return _check_picker(guild, action)
     return await _check_member(guild, action)
 
 
@@ -201,9 +209,13 @@ def _check_channel(guild, action):
         return "There's no channel by that name."
     action["channel_id"] = target.id
     action["channel"] = target.name
-    if target.id in core_ids(guild) and kind in (RENAME, DELETE, PURGE):
+    if target.id in core_ids(guild) and kind in (RENAME, DELETE, PURGE, ACCESS):
         return (f"#{target.name} is one the bot depends on, so it can't be renamed, "
-                "deleted or purged.")
+                "deleted, purged or hidden.")
+    if kind == ACCESS:
+        names = action.get("roles") or []
+        return _pick_roles(guild, names if isinstance(names, list) else [names], action,
+                           allow_none=True)
     if kind == RENAME:
         voice = isinstance(target, discord.VoiceChannel)
         new = str(action.get("name") or "").strip()[:100] if voice else text_name(action.get("name"))
@@ -256,6 +268,73 @@ def _check_role(guild, action):
                 return "Say what to change: its name, its color, or whether members can join it."
     if action.get("color") is not None and _colour(action["color"]) is None:
         return "A color is written like #1E88E5."
+    return None
+
+
+def _pick_roles(guild, names, action, allow_none=False):
+    """Check the roles named in a picker or a channel's access: roles made
+    by vote, or new ones, made with it (no powers, members can join them).
+    Any other existing role (a name color, the Admin role) can't be used.
+    Sets action["roles"] and action["new_roles"]."""
+    names = list(dict.fromkeys(str(n).strip().lstrip("@")[:100] for n in names
+                               if str(n).strip()))
+    if not (0 if allow_none else 1) <= len(names) <= pickers.MAX_ROLES:
+        return f"Name 1 to {pickers.MAX_ROLES} roles."
+    voted, new = voted_roles(), []
+    for name in names:
+        role = discord.utils.get(guild.roles, name=name)
+        if role is None:
+            new.append(name)
+        elif role.id not in voted:
+            return f"{name} is a role members can't give themselves, so it can't be used."
+    if len(voted) + len(new) > MAX_ROLES:
+        return "That would make more roles than the server allows by vote."
+    action["roles"], action["new_roles"] = names, new
+    return None
+
+
+async def _make_roles(guild, names):
+    for name in names:
+        role = await guild.create_role(name=name, permissions=discord.Permissions.none(),
+                                       hoist=False, mentionable=False, reason=REASON)
+        _save_role(role.id, True)
+
+
+def _check_picker(guild, action):
+    """A picker offers roles made by vote. Names it doesn't find yet are
+    new roles, made with it; any other existing role (a name color, the
+    Admin role) can't be offered."""
+    kind = action["kind"]
+    if kind != PICKER_CREATE:
+        picker = pickers.get(action.get("picker_no") or 0) or pickers.find(action.get("picker"))
+        if picker is None:
+            return "There's no picker by that name. Ask me to list the roles to see them."
+        action["picker_no"], action["picker"] = picker["no"], picker["title"]
+        if kind == PICKER_DELETE:
+            return None
+        if all(action.get(k) is None for k in ("title", "roles", "one")):
+            return "Say what to change: its title, its roles, or whether members pick one."
+    elif len(pickers.all_pickers()) >= pickers.MAX_PICKERS:
+        return f"There are already {pickers.MAX_PICKERS} pickers, which is the most."
+    if action.get("title") is not None:
+        title = str(action["title"]).strip()[:100]
+        if not title:
+            return "Give the picker a title, like \"Where are you from?\"."
+        same = pickers.find(title)
+        if same is not None and same["no"] != action.get("picker_no"):
+            return f"There's already a picker called {title}."
+        action["title"] = title
+    elif kind == PICKER_CREATE:
+        return "Give the picker a title, like \"Where are you from?\"."
+    if action.get("roles") is not None:
+        names = action["roles"] if isinstance(action["roles"], list) else [action["roles"]]
+        problem = _pick_roles(guild, names, action)
+        if problem:
+            return problem
+    elif kind == PICKER_CREATE:
+        return "Say which roles the picker offers."
+    if action.get("one") is not None or kind == PICKER_CREATE:
+        action["one"] = bool(action.get("one", True))
     return None
 
 
@@ -389,6 +468,15 @@ def describe(action):
                            f"Set slowmode in **{a['channel']}** to {a['slowmode']} seconds."),
         PURGE: lambda: (f"Clear {a['channel']}'s history", f"Delete every message in "
                         f"**{a['channel']}**. The channel stays; its messages can't be restored."),
+        ACCESS: lambda: ((f"Open {a['channel']} to everyone", f"Let everyone see **"
+                          f"{a['channel']}** again.") if not a["roles"] else
+                         (f"Make {a['channel']} opt-in", f"Only members with "
+                          + " or ".join(f"**{r}**" for r in a["roles"])
+                          + f" can see **{a['channel']}**. Anyone can join "
+                          + ("that role" if len(a["roles"]) == 1 else "those roles")
+                          + " by asking the bot."
+                          + (" New roles, made with it and giving no powers: "
+                             + ", ".join(a["new_roles"]) + "." if a.get("new_roles") else ""))),
         CATEGORY_CREATE: lambda: (f"Create the category {a['name']}",
                                   f"Create a category called **{a['name']}**."),
         CATEGORY_RENAME: lambda: (f"Rename the category {a['category']}",
@@ -425,6 +513,11 @@ def describe(action):
                        "They can come back with a new invite."),
         BAN: lambda: (f"Ban {a['member_name']}", f"Ban <@{a['member']}> from the server."),
         UNBAN: lambda: (f"Unban {a['member_name']}", f"Lift the ban on {a['member_name']}."),
+        PICKER_CREATE: lambda: (f"Add a picker: {a['title']}", _picker_details(a)),
+        PICKER_EDIT: lambda: (f"Change the picker {a['picker']}", _picker_details(a)),
+        PICKER_DELETE: lambda: (f"Remove the picker {a['picker']}",
+                                f"Remove the picker **{a['picker']}** from #roles. Its roles "
+                                "stay, and so does whoever has them."),
     }
     title, details = lines[kind]()
     if action.get("reason"):
@@ -434,6 +527,23 @@ def describe(action):
                     "they can't vote on it, and it needs a higher share to pass.")
     details += "\n\nIf this passes, the bot makes the change itself."
     return title[:100], details
+
+
+def _picker_details(a):
+    said = []
+    if a["kind"] == PICKER_CREATE:
+        said.append(f"Post a picker in #roles called **{a['title']}**.")
+    else:
+        said.append(f"Change the picker **{a['picker']}** in #roles"
+                    + (f": call it **{a['title']}**." if a.get("title") else "."))
+    if a.get("roles") is not None:
+        said.append("It offers: " + ", ".join(a["roles"]) + ".")
+    if a.get("new_roles"):
+        said.append("New roles, made with it and giving no powers: "
+                    + ", ".join(a["new_roles"]) + ".")
+    if a.get("one") is not None:
+        said.append("Members pick one." if a["one"] else "Members pick any that fit.")
+    return " ".join(said)
 
 
 # ---------- carrying out ----------
@@ -463,6 +573,8 @@ async def carry_out(guild, action):
             return f"Done: the category is now {a['name']}."
         await category.delete(reason=REASON)
         return f"Done: the category {a['category']} is deleted."
+    if kind == ACCESS:
+        return await _carry_out_access(guild, a)
     if kind in (RENAME, DELETE, TOPIC, SLOWMODE, PURGE):
         return await _carry_out_channel(guild, a)
     if kind in ROLE_KINDS:
@@ -496,6 +608,8 @@ async def carry_out(guild, action):
     if kind == EVENT_CANCEL:
         await guild.get_scheduled_event(a["event_id"]).cancel(reason=REASON)
         return f"Done: {a['event']} is cancelled."
+    if kind in PICKER_KINDS:
+        return await _carry_out_picker(guild, a)
     return await _carry_out_member(guild, a)
 
 
@@ -520,6 +634,28 @@ async def _carry_out_channel(guild, a):
     return f"Done: {len(deleted)} messages deleted from {target.mention}."
 
 
+async def _carry_out_access(guild, a):
+    """Only the given roles see the channel, or everyone if none. Other
+    overrides (the bot's, the Admin role's) are left alone; seeing a
+    channel is not a power, so guard.py lets it be."""
+    target = guild.get_channel(a["channel_id"])
+    await _make_roles(guild, a.get("new_roles", []))
+    voted = voted_roles()
+    wanted = {discord.utils.get(guild.roles, name=name) for name in a["roles"]}
+    overwrites = {t: o for t, o in target.overwrites.items()
+                  if not (isinstance(t, discord.Role) and t.id in voted)}
+    everyone = overwrites.get(guild.default_role, discord.PermissionOverwrite())
+    everyone.update(view_channel=False if wanted else None)
+    overwrites[guild.default_role] = everyone
+    for role in wanted:
+        overwrites[role] = discord.PermissionOverwrite(view_channel=True)
+    await target.edit(overwrites=overwrites, reason=REASON)
+    if not wanted:
+        return f"Done: everyone can see {target.mention}."
+    return (f"Done: only members with {', '.join(r.name for r in wanted)} can see "
+            f"{target.mention}.")
+
+
 async def _carry_out_role(guild, a):
     kind = a["kind"]
     if kind == ROLE_CREATE:
@@ -533,6 +669,7 @@ async def _carry_out_role(guild, a):
     if kind == ROLE_DELETE:
         await role.delete(reason=REASON)
         _forget_role(role.id)
+        await pickers.role_gone(guild, role.id)
         return f"Done: the role {a['role']} is deleted."
     changes = {}
     if a.get("name"):
@@ -544,6 +681,27 @@ async def _carry_out_role(guild, a):
         _save_role(role.id, bool(a["joinable"]))
     await role.edit(reason=REASON, **changes)
     return f"Done: the role {role.name} is updated."
+
+
+async def _carry_out_picker(guild, a):
+    if a["kind"] == PICKER_DELETE:
+        picker = pickers.get(a["picker_no"])
+        await pickers.hide(guild, picker)
+        pickers.forget(picker["no"])
+        return f"Done: the picker {a['picker']} is removed."
+    await _make_roles(guild, a.get("new_roles", []))
+    picker = (pickers.get(a["picker_no"]) if a["kind"] == PICKER_EDIT
+              else {"no": None, "message_id": None})
+    if a.get("title"):
+        picker["title"] = a["title"]
+    if a.get("roles") is not None:
+        picker["roles"] = [discord.utils.get(guild.roles, name=name).id for name in a["roles"]]
+    if a.get("one") is not None:
+        picker["one"] = a["one"]
+    picker = pickers.save(picker)
+    if not await pickers.show(guild, picker):
+        return f"The picker {picker['title']} is saved, but there's no #roles to post it in."
+    return f"Done: the picker {picker['title']} is in #roles."
 
 
 async def _carry_out_rule(guild, a):

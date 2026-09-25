@@ -222,7 +222,7 @@ class Guard(WithTempData):
         self.assertTrue(any("ban_members" in s and "Mods" in s for s in said))
 
     async def test_a_role_it_cant_fix_is_reported_once_across_restarts(self):
-        above = role(12, "Admin", position=60,
+        above = role(12, "Mods", position=60,
                      permissions=discord.Permissions(ban_members=True))
         g = guild([above])
         said = []
