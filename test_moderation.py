@@ -80,6 +80,7 @@ class FirstCheck(unittest.TestCase):
         prompt = judge.explain_prompt("STATE", v)
         self.assertIn("No hate", prompt)
         self.assertIn("not yours to review", prompt)
+        self.assertIn("Never use an em dash", prompt)
         screening = judge.screen(answers(hate=0.9))
         self.assertIn("90% likely to be hate", judge.fallback_explanation(v, screening))
 
@@ -96,6 +97,7 @@ class Review(unittest.TestCase):
         for title, _ in conduct.rules():
             self.assertIn(title, prompt)
         self.assertIn("STATE", prompt)
+        self.assertIn("Never use an em dash", prompt)
 
     def test_only_a_well_formed_violation_becomes_a_verdict(self):
         ok = {"violation": True, "rule": 1, "severity": "mild", "explanation": "Insulted Rami."}
