@@ -7,7 +7,9 @@ because the server may have changed during the vote. Things are named by
 their current name when drafting and remembered by id after that.
 
 Limits that hold whatever a vote says:
-- the channels the bot depends on can't be renamed or deleted;
+- the channels the bot depends on can't be renamed, deleted or purged, so the
+  moderation and admin logs, and the record of every admin action, can't be
+  wiped by a vote or an admin acting alone;
 - roles are cosmetic: they are created with no permissions, and guard.py
   takes away any that appear later;
 - rules 4 to 6 and the original rules can't be removed (conduct.py), and
@@ -199,8 +201,9 @@ def _check_channel(guild, action):
         return "There's no channel by that name."
     action["channel_id"] = target.id
     action["channel"] = target.name
-    if target.id in core_ids(guild) and kind in (RENAME, DELETE):
-        return f"#{target.name} is one the bot depends on, so it can't be renamed or deleted."
+    if target.id in core_ids(guild) and kind in (RENAME, DELETE, PURGE):
+        return (f"#{target.name} is one the bot depends on, so it can't be renamed, "
+                "deleted or purged.")
     if kind == RENAME:
         voice = isinstance(target, discord.VoiceChannel)
         new = str(action.get("name") or "").strip()[:100] if voice else text_name(action.get("name"))

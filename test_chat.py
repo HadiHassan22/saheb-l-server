@@ -119,11 +119,12 @@ class Checks(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("can't be restored", details)
         self.assertIn("Nobody uses it", details)
 
-    def test_a_channel_the_bot_depends_on_can_still_be_purged(self):
-        problem, action = self.check(kind=actions.PURGE, channel="welcome")
+    def test_a_channel_the_bot_depends_on_cant_be_purged(self):
+        self.assertIn("depends on", self.check(kind=actions.PURGE, channel="welcome")[0])
+        problem, action = self.check(kind=actions.PURGE, channel="cars")
         self.assertIsNone(problem)
         title, details = actions.describe(action)
-        self.assertEqual(title, "Clear welcome's history")
+        self.assertEqual(title, "Clear cars's history")
         self.assertIn("can't be restored", details)
 
     def test_only_text_channels_can_be_purged(self):
