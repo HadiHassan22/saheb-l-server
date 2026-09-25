@@ -31,8 +31,9 @@ import store
 
 log = logging.getLogger("actions")
 
-CREATE, RENAME, DELETE, TOPIC, SLOWMODE = (
-    "create_channel", "rename_channel", "delete_channel", "set_topic", "set_slowmode")
+CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE = (
+    "create_channel", "rename_channel", "delete_channel", "set_topic", "set_slowmode",
+    "purge_channel")
 CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE = (
     "create_category", "rename_category", "delete_category")
 ROLE_CREATE, ROLE_EDIT, ROLE_DELETE = "create_role", "edit_role", "delete_role"
@@ -43,7 +44,7 @@ WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 
-CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE,
+CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE,
                  CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE)
 ROLE_KINDS = (ROLE_CREATE, ROLE_EDIT, ROLE_DELETE)
 EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
@@ -208,6 +209,9 @@ def _check_channel(guild, action):
         action["name"] = new
     if kind in (TOPIC, SLOWMODE) and not isinstance(target, discord.TextChannel):
         return "Only text channels have a topic and slowmode."
+    if kind == PURGE:
+        return (None if isinstance(target, discord.TextChannel)
+                else "Only text channels can be purged.")
     return _check_text_settings(action)
 
 
@@ -380,6 +384,8 @@ def describe(action):
                         f"Set the topic of **{a['channel']}** to: {a['topic']}"),
         SLOWMODE: lambda: (f"Slowmode of {a['slowmode']}s in {a['channel']}",
                            f"Set slowmode in **{a['channel']}** to {a['slowmode']} seconds."),
+        PURGE: lambda: (f"Clear {a['channel']}'s history", f"Delete every message in "
+                        f"**{a['channel']}**. The channel stays; its messages can't be restored."),
         CATEGORY_CREATE: lambda: (f"Create the category {a['name']}",
                                   f"Create a category called **{a['name']}**."),
         CATEGORY_RENAME: lambda: (f"Rename the category {a['category']}",
@@ -454,7 +460,7 @@ async def carry_out(guild, action):
             return f"Done: the category is now {a['name']}."
         await category.delete(reason=REASON)
         return f"Done: the category {a['category']} is deleted."
-    if kind in (RENAME, DELETE, TOPIC, SLOWMODE):
+    if kind in (RENAME, DELETE, TOPIC, SLOWMODE, PURGE):
         return await _carry_out_channel(guild, a)
     if kind in ROLE_KINDS:
         return await _carry_out_role(guild, a)
@@ -504,8 +510,11 @@ async def _carry_out_channel(guild, a):
     if kind == TOPIC:
         await target.edit(topic=a["topic"], reason=REASON)
         return f"Done: {target.mention} has its new topic."
-    await target.edit(slowmode_delay=a["slowmode"], reason=REASON)
-    return f"Done: slowmode in {target.mention} is {a['slowmode']} seconds."
+    if kind == SLOWMODE:
+        await target.edit(slowmode_delay=a["slowmode"], reason=REASON)
+        return f"Done: slowmode in {target.mention} is {a['slowmode']} seconds."
+    deleted = await target.purge(limit=None, reason=REASON)
+    return f"Done: {len(deleted)} messages deleted from {target.mention}."
 
 
 async def _carry_out_role(guild, a):
