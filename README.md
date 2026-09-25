@@ -39,7 +39,8 @@ repeated violations. Every action is posted in `#mod-log` with the
 reasoning.
 
 **Talk to the bot.** Ask Saheb l Server anything in `#ask-saheb`, in
-English, Arabic or Arabizi: tag it or reply to one of its messages. It
+English, Arabic or Arabizi: tag it or reply to one of its messages, with an
+image attached if you want it to see one. It
 changes your name color when you ask (or
 pick one in `#roles`), answers questions about the server, and drafts
 proposals for anything that affects everyone. It never files a proposal
@@ -117,7 +118,10 @@ first one it's invited to becomes its home, and it leaves any other.
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
 answers in the language they use. It answers only messages that tag it or
 reply to it, so members can also talk to each other there. It is the only
-channel where the bot reads ordinary messages. The model understands the request, and code
+channel where the bot reads ordinary messages. If such a message has an
+image attached, the bot can see it too (up to 3 images, 5 MB each) and use
+what's in it, for example drafting an emoji or the server's icon straight
+from the attachment. The model understands the request, and code
 decides what is allowed: every tool is in one of four tiers, fixed in
 `assistant.py`.
 

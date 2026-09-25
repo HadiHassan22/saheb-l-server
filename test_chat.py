@@ -155,16 +155,27 @@ def reply(text="", calls=()):
                                              for i, (n, a) in enumerate(calls)])
 
 
-class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
-    def ctx(self):
-        return assistant.Context(guild=self.guild, member=types.SimpleNamespace(
-            id=7, display_name="Hadi"))
+def attachment(content_type, data, size=None):
+    a = mock.Mock(spec=discord.Attachment)
+    a.content_type, a.size = content_type, size if size is not None else len(data)
+    a.read = mock.AsyncMock(return_value=data)
+    return a
 
-    async def talk(self, *replies, text="hi"):
-        ctx = self.ctx()
+
+class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
+    def ctx(self, attachments=()):
+        return assistant.Context(guild=self.guild, member=types.SimpleNamespace(
+            id=7, display_name="Hadi"), attachments=list(attachments))
+
+    async def talk(self, *replies, text="hi", attachments=()):
+        ctx = self.ctx(attachments)
         with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=list(replies))) as c:
             answer = await assistant.respond(ctx, [], text)
         return ctx, answer, c
+
+    def sent_images(self, calls):
+        turns = calls.call_args_list[0].args[1]
+        return next(t for t in turns if t["role"] == "user")["images"]
 
     async def test_asking_for_blue_changes_only_your_own_color(self):
         with mock.patch.object(colors, "wear", mock.AsyncMock(return_value="You're now Mediterranean.")) as wear:
@@ -197,6 +208,21 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         _, answer, _ = await self.talk(
             *[reply(calls=[("grant_admin", {})])] * assistant.MAX_ROUNDS)
         self.assertIn("too many steps", answer)
+
+    async def test_an_attached_image_is_shown_to_the_model(self):
+        picture = attachment("image/png", b"pixels")
+        pdf = attachment("application/pdf", b"not a picture")
+        ctx, answer, calls = await self.talk(
+            reply("That's a nice picture."), attachments=[picture, pdf])
+        self.assertEqual(self.sent_images(calls), [("image/png", b"pixels")])
+        self.assertEqual(answer, "That's a nice picture.")
+
+    async def test_images_that_are_too_big_or_too_many_are_left_out(self):
+        too_big = attachment("image/png", b"x", size=assistant.MAX_VIEWABLE_BYTES + 1)
+        many = [attachment("image/png", f"img{i}".encode())
+                for i in range(assistant.MAX_VIEWABLE_IMAGES + 2)]
+        _, _, calls = await self.talk(reply("ok"), attachments=[too_big, *many])
+        self.assertEqual(len(self.sent_images(calls)), assistant.MAX_VIEWABLE_IMAGES)
 
     async def test_a_filed_draft_becomes_the_right_kind_of_proposal(self):
         ctx, _, _ = await self.talk(
