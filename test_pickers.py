@@ -15,6 +15,7 @@ from unittest import mock
 import discord
 
 import actions
+import ai
 import assistant
 import layout
 import pickers
@@ -81,8 +82,13 @@ class WithGuild(unittest.IsolatedAsyncioTestCase):
                 (r for r in self.roles if r.id == rid), None))
         self._layout = mock.patch.object(layout, "channel", lambda g, name: self.channel)
         self._layout.start()
+        # No AI unless a test gives it an answer: the bot's groups stay as they are.
+        self.review = mock.AsyncMock(side_effect=ai.Unavailable("no key"))
+        self._ai = mock.patch.object(ai, "review", self.review)
+        self._ai.start()
 
     def tearDown(self):
+        self._ai.stop()
         self._layout.stop()
         store.DATA_DIR = self._saved_dir
         shutil.rmtree(self._tmp)
@@ -266,6 +272,85 @@ class Grouping(WithGuild):
         pickers.save({"title": "Interests", "roles": [1, 2], "one": False, "message_id": None})
         prompt = assistant.system(datetime(2026, 9, 25, tzinfo=timezone.utc))
         self.assertIn("Pickers in #roles now: Interests (pick any, 2 roles).", prompt)
+
+
+class SmartGroups(WithGuild):
+    """Roles in no picker are grouped the way a person would group them."""
+
+    def setUp(self):
+        super().setUp()
+        self.male, self.female, self.gamer = role(20, "Male"), role(21, "Female"), role(22, "Gamer")
+        self.roles.extend([self.male, self.female, self.gamer])
+        store.save("roles", {str(r): {"joinable": True} for r in (10, 20, 21, 22)})
+
+    def auto(self):
+        return {p["title"]: (p["roles"], p["one"]) for p in pickers.all_pickers()
+                if p.get("auto")}
+
+    async def test_male_and_female_go_in_a_pick_one_gender_picker(self):
+        # Roles are numbered by name: Female, Gamer, Lebanese, Male.
+        self.review.side_effect = None
+        self.review.return_value = {"groups": [{"title": "Gender", "one": True,
+                                                "roles": [1, 4]}]}
+        await actions.offer_opt_in(self.guild)
+        self.assertEqual(self.auto(), {"Gender": ([21, 20], True),
+                                       pickers.OPT_IN: ([22, 10], False)})
+        prompt = self.review.call_args.args[0]
+        self.assertIn("1. Female", prompt)
+        self.assertIn("Pick one.", [m.sent[0] for m in self.messages][0])
+        await actions.offer_opt_in(self.guild)  # nothing changed: the AI isn't asked again
+        self.assertEqual(self.review.await_count, 1)
+
+    async def test_without_the_ai_new_roles_go_in_opt_in_and_groups_stay(self):
+        await actions.offer_opt_in(self.guild)
+        self.assertEqual(self.auto(), {pickers.OPT_IN: ([21, 22, 10, 20], False)})
+        store.save("groups", {"roles": [21, 22, 10, 20], "groups": [
+            {"title": "Gender", "one": True, "roles": [21, 20]}]})
+        self.roles.append(role(23, "Chess"))
+        store.save("roles", {str(r): {"joinable": True} for r in (10, 20, 21, 22, 23)})
+        await actions.offer_opt_in(self.guild)
+        self.assertEqual(self.auto(), {"Gender": ([21, 20], True),
+                                       pickers.OPT_IN: ([23, 22, 10], False)})
+        self.assertEqual(self.review.await_count, 2)  # tried each time: nothing remembered
+
+    def test_the_ais_groups_are_checked(self):
+        answer = {"groups": [
+            {"title": "Gender", "one": True, "roles": [1, 4, 4]},
+            {"title": "Solo", "one": False, "roles": [2]},          # one role: no group
+            {"title": "From", "one": True, "roles": [3, 9]},        # 9 doesn't exist
+            {"title": "Taken", "one": False, "roles": [2, 3]},      # a member's title
+            {"title": "Again", "one": False, "roles": [1, 2]},      # 1 is in Gender
+            {"title": " ", "one": False, "roles": [2, 3]},
+        ]}
+        self.assertEqual(pickers._groups(answer, 4, ["taken"]), [("Gender", True, [0, 3])])
+        self.assertEqual(pickers._groups({"groups": None}, 4, []), [])
+
+    async def test_changing_a_bots_group_makes_it_the_members(self):
+        store.save("groups", {"roles": [21, 22, 10, 20], "groups": [
+            {"title": "Gender", "one": True, "roles": [21, 20]}]})
+        await actions.offer_opt_in(self.guild)
+        self.assertIn("keeps", await actions.check(self.guild, {
+            "kind": actions.PICKER_DELETE, "picker": "Gender"}))
+        await self.carry_out(kind=actions.PICKER_EDIT, picker="Gender", title="Gender?")
+        self.assertEqual([p["title"] for p in pickers.made_by_members()], ["Gender?"])
+        self.assertEqual(list(self.auto()), [pickers.OPT_IN])
+
+    async def test_a_new_role_named_for_a_bots_group_joins_it(self):
+        store.save("groups", {"roles": [21, 22, 10, 20], "groups": [
+            {"title": "Gender", "one": True, "roles": [21, 20]}]})
+        await actions.offer_opt_in(self.guild)
+        said, _ = await self.carry_out(kind=actions.ROLE_CREATE, name="Non-binary",
+                                       picker="gender")
+        self.assertIn("in the Gender picker", said)
+        gender = pickers.find("Gender")
+        self.assertEqual((gender["roles"][-1], gender["one"], gender.get("auto")),
+                         (self.roles[-1].id, True, None))
+
+    def test_the_bot_is_told_about_its_own_groups(self):
+        pickers.save({"title": "Gender", "roles": [20, 21], "one": True, "auto": True,
+                      "message_id": None})
+        prompt = assistant.system(datetime(2026, 9, 25, tzinfo=timezone.utc))
+        self.assertIn("Gender (pick one, 2 roles)", prompt)
 
 
 class Picking(WithGuild):

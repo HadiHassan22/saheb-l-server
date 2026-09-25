@@ -74,7 +74,7 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 **Talk to the bot.** Ask Saheb l Server anything in {ask_mention}, in English, Arabic or Arabizi. Tag it or reply to one of its messages; it doesn't answer anything else.
 - For you, right away: your name color, joining a role, your nickname, an invite link.
 - For everyone, right away: scheduling an event, a temporary voice channel, a thread, a pin. These are posted in #server-log with who asked.
-- Anything else that affects everyone (channels, roles, pickers in #roles, emojis, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
+- Anything else that affects everyone (channels, roles, pickers in #roles, the questions new members are asked, emojis, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
 
 **Appeals.** Think the bot got it wrong? Use `/appeal` with the case number, or the Appeal button in its message to you. The community votes, and can overturn any action.
 

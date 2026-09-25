@@ -30,6 +30,7 @@ import automod
 import conduct
 import kinds
 import layout
+import onboarding
 import pickers
 import proposals
 import store
@@ -50,6 +51,8 @@ WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 PICKER_CREATE, PICKER_EDIT, PICKER_DELETE = "create_picker", "edit_picker", "delete_picker"
+ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE = (
+    "set_onboarding_channels", "set_onboarding_question", "remove_onboarding_question")
 
 CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE, ACCESS,
                  CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE)
@@ -60,8 +63,9 @@ RULE_KINDS = (RULE_EDIT, RULE_ADD, RULE_REMOVE)
 WATCH_KINDS = (WATCH_ADD, WATCH_REMOVE)
 PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
+ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
-         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS)
+         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
@@ -157,6 +161,8 @@ async def check(guild, action):
         return _check_event(guild, action)
     if kind in PICKER_KINDS:
         return _check_picker(guild, action)
+    if kind in ONBOARDING_KINDS:
+        return _check_onboarding(guild, action)
     return await _check_member(guild, action)
 
 
@@ -312,12 +318,14 @@ def _check_picker(guild, action):
         picker = pickers.get(action.get("picker_no") or 0) or pickers.find(action.get("picker"))
         if picker is None:
             return "There's no picker by that name. Ask me to list the roles to see them."
-        if picker.get("auto"):
+        if picker.get("auto") and kind == PICKER_DELETE:
             return (f"The bot keeps {picker['title']} itself: it offers every role members "
-                    "can join that no other picker does. Change the roles instead.")
+                    "can join that no other picker does. Change it, or the roles, instead.")
         action["picker_no"], action["picker"] = picker["no"], picker["title"]
         if kind == PICKER_DELETE:
             return None
+        if picker.get("auto") and len(pickers.made_by_members()) >= pickers.MAX_PICKERS:
+            return f"There are already {pickers.MAX_PICKERS} pickers, which is the most."
         if all(action.get(k) is None for k in ("title", "roles", "one")):
             return "Say what to change: its title, its roles, or whether members pick one."
     elif len(pickers.made_by_members()) >= pickers.MAX_PICKERS:
@@ -349,15 +357,122 @@ def _check_role_picker(action):
     names one that exists, or a new one (members pick any, unless `one`)."""
     title = str(action.get("picker") or "").strip()[:100]
     found = pickers.find(title) if title else None
-    if not title or not action["joinable"] or (found and found.get("auto")):
-        action.pop("picker", None)  # the Opt-in roles picker offers it anyway
+    if (not title or not action["joinable"]
+            or (found and found["title"].startswith(pickers.OPT_IN))):
+        action.pop("picker", None)  # the bot's own pickers offer it anyway
         return None
-    if found is None and len(pickers.made_by_members()) >= pickers.MAX_PICKERS:
+    # A group the bot made becomes an ordinary picker when a role is put in it.
+    if ((found is None or found.get("auto"))
+            and len(pickers.made_by_members()) >= pickers.MAX_PICKERS):
         return f"There are already {pickers.MAX_PICKERS} pickers; put it in one of those."
     if found is not None and len(found["roles"]) >= pickers.MAX_ROLES:
         return f"The picker {found['title']} is full."
     action["picker"] = found["title"] if found else title
     action["new_picker"] = found is None
+    return None
+
+
+def _find_channel(guild, name):
+    asked = str(name or "").strip().lstrip("#")
+    found = (discord.utils.get(guild.channels, name=asked)
+             or discord.utils.get(guild.channels, name=text_name(asked)))
+    return None if isinstance(found, discord.CategoryChannel) else found
+
+
+def _onboarding_channels(guild, names):
+    """Channel ids for `names`, or why not: onboarding can only show
+    channels everyone can see."""
+    ids = []
+    for name in names if isinstance(names, list) else [names]:
+        found = _find_channel(guild, name)
+        if found is None:
+            return None, f"There's no channel called {name}."
+        if not onboarding.seen_by_everyone(guild, found):
+            return None, f"#{found.name} is hidden from some members, so onboarding can't show it."
+        ids.append(found.id)
+    return list(dict.fromkeys(ids)), None
+
+
+def _check_onboarding(guild, action):
+    """The server's own onboarding questions and default channels. The
+    questions from pickers change with the pickers."""
+    kind, current = action["kind"], onboarding.saved(guild)
+    if kind == ONBOARDING_CHANNELS:
+        add, problem = _onboarding_channels(guild, action.get("add") or [])
+        if problem:
+            return problem
+        remove, problem = _onboarding_channels(guild, action.get("remove") or [])
+        if problem:
+            return problem
+        if not add and not remove:
+            return "Say which channels to add to or remove from the ones new members see."
+        after = [c for c in dict.fromkeys(current["channels"] + add) if c not in remove]
+        seen = [c for i in after if (c := guild.get_channel(i))]
+        if (len(seen) < onboarding.MIN_CHANNELS
+                or sum(onboarding.open_to_talk(guild, c) for c in seen) < onboarding.MIN_OPEN):
+            return (f"Discord needs at least {onboarding.MIN_CHANNELS} default channels, "
+                    f"{onboarding.MIN_OPEN} of them ones everyone can write in.")
+        action["add"] = [guild.get_channel(c).name for c in add]
+        action["remove"] = [guild.get_channel(c).name for c in remove]
+        action["channel_ids"] = after
+        return None
+    asked = action.get("question") or (action.get("title") if kind == ONBOARDING_QUESTION
+                                       else None)
+    existing = onboarding.find(guild, asked)
+    if pickers.find(asked) is not None:
+        return (f"{pickers.find(asked)['title']} is a picker in #roles, and onboarding asks "
+                "it as it is. Change the picker instead.")
+    if kind == ONBOARDING_REMOVE:
+        if existing is None:
+            return "There's no onboarding question by that name."
+        action["question"] = existing["title"]
+        return None
+    if action.get("question") and existing is None:
+        return "There's no onboarding question by that name."
+    title = str(action.get("title") or (existing or {}).get("title") or "").strip()
+    if not 1 <= len(title) <= onboarding.MAX_TITLE:
+        return f"Give the question a title of up to {onboarding.MAX_TITLE} characters."
+    clash = onboarding.find(guild, title)
+    if pickers.find(title) is not None or (clash is not None and clash is not existing):
+        return f"There's already a question or picker called {title}."
+    if existing is None and (len(current["questions"]) + len(pickers.all_pickers())
+                             >= onboarding.MAX_QUESTIONS):
+        return f"Onboarding holds at most {onboarding.MAX_QUESTIONS} questions, pickers included."
+    options = action.get("options") or []
+    if not isinstance(options, list) or not 1 <= len(options) <= onboarding.MAX_OPTIONS:
+        return f"A question needs 1 to {onboarding.MAX_OPTIONS} answers."
+    voted, checked = voted_roles(), []
+    for option in options:
+        if not isinstance(option, dict):
+            return "Each answer needs a title, and the channels or roles it gives."
+        name = str(option.get("title") or "").strip()
+        if not 1 <= len(name) <= onboarding.MAX_OPTION_TITLE:
+            return f"Each answer needs a title of up to {onboarding.MAX_OPTION_TITLE} characters."
+        description = str(option.get("description") or "").strip()
+        if len(description) > onboarding.MAX_DESCRIPTION:
+            return f"An answer's description can be at most {onboarding.MAX_DESCRIPTION} characters."
+        emoji = str(option.get("emoji") or "").strip()
+        if len(emoji) > 32 or " " in emoji:
+            return "An answer's emoji is a single emoji."
+        channels, problem = _onboarding_channels(guild, option.get("channels") or [])
+        if problem:
+            return problem
+        roles = []
+        for role_name in option.get("roles") or []:
+            role = discord.utils.get(guild.roles, name=str(role_name).strip().lstrip("@"))
+            if role is None or not voted.get(role.id, {}).get("joinable"):
+                return f"{role_name} isn't a role members can join, so onboarding can't give it."
+            roles.append(role.name)
+        if not channels and not roles:
+            return f"The answer {name} needs a channel or a role to give."
+        checked.append({"title": name, "emoji": emoji or None,
+                        "description": description or None,
+                        "channels": [guild.get_channel(c).name for c in channels],
+                        "roles": roles})
+    action.update(title=title, one=bool(action.get("one", (existing or {}).get("one", False))),
+                  options=checked)
+    if existing is not None:
+        action["question"] = existing["title"]
     return None
 
 
@@ -545,6 +660,19 @@ def describe(action):
         PICKER_DELETE: lambda: (f"Remove the picker {a['picker']}",
                                 f"Remove the picker **{a['picker']}** from #roles. Its roles "
                                 "stay, and so does whoever has them."),
+        ONBOARDING_CHANNELS: lambda: ("Change the channels new members see", " ".join(
+            filter(None, [
+                ("New members also see " + ", ".join(f"#{c}" for c in a["add"]) + "."
+                 if a["add"] else ""),
+                ("They no longer see " + ", ".join(f"#{c}" for c in a["remove"])
+                 + " at first; they can still find them in Browse Channels."
+                 if a["remove"] else "")]))),
+        ONBOARDING_QUESTION: lambda: ((f"Change the onboarding question {a['question']}"
+                                       if a.get("question") else
+                                       f"Ask new members: {a['title']}"), _question_details(a)),
+        ONBOARDING_REMOVE: lambda: (f"Stop asking new members {a['question']}",
+                                    f"Take the question **{a['question']}** out of "
+                                    "onboarding. Whoever answered it keeps what it gave them."),
     }
     title, details = lines[kind]()
     if action.get("reason"):
@@ -573,6 +701,19 @@ def _picker_details(a):
     return " ".join(said)
 
 
+def _question_details(a):
+    said = [f"When they join, new members are asked **{a['title']}**"
+            + (" and pick one:" if a["one"] else " and pick any:")]
+    for option in a["options"]:
+        gives = ([f"#{c}" for c in option["channels"]]
+                 + [f"the role {r}" for r in option["roles"]])
+        emoji = f"{option['emoji']} " if option["emoji"] else ""
+        said.append(f"- {emoji}**{option['title']}**"
+                    + (f" ({option['description']})" if option["description"] else "")
+                    + ": " + ", ".join(gives))
+    return "\n".join(said)[:1500]
+
+
 # ---------- carrying out ----------
 
 async def offer_opt_in(guild):
@@ -588,6 +729,10 @@ async def carry_out(guild, action):
             await offer_opt_in(guild)
         except discord.HTTPException as e:
             log.warning(f"the Opt-in roles picker wasn't updated: {e!r}")
+    if action["kind"] in ROLE_KINDS + PICKER_KINDS + CHANNEL_KINDS + ONBOARDING_KINDS:
+        problem = await onboarding.sync(guild)
+        if problem and action["kind"] in ONBOARDING_KINDS and said.startswith("Done"):
+            said += f" Discord doesn't show it yet: {problem}."
     return said
 
 
@@ -652,6 +797,8 @@ async def _carry_out(guild, action):
         return f"Done: {a['event']} is cancelled."
     if kind in PICKER_KINDS:
         return await _carry_out_picker(guild, a)
+    if kind in ONBOARDING_KINDS:
+        return _carry_out_onboarding(guild, a)
     return await _carry_out_member(guild, a)
 
 
@@ -712,6 +859,7 @@ async def _carry_out_role(guild, a):
                                                "title": a["picker"], "roles": [],
                                                "one": bool(a.get("one", False))}
         picker["roles"] = picker["roles"] + [role.id]
+        picker.pop("auto", None)
         await pickers.show(guild, pickers.save(picker))
         return f"Done: the role {role.name} exists, in the {picker['title']} picker in #roles."
     role = guild.get_role(a["role_id"])
@@ -741,6 +889,7 @@ async def _carry_out_picker(guild, a):
     await _make_roles(guild, a.get("new_roles", []))
     picker = (pickers.get(a["picker_no"]) if a["kind"] == PICKER_EDIT
               else {"no": None, "message_id": None})
+    picker.pop("auto", None)  # changing one the bot kept makes it the members'
     if a.get("title"):
         picker["title"] = a["title"]
     if a.get("roles") is not None:
@@ -751,6 +900,33 @@ async def _carry_out_picker(guild, a):
     if not await pickers.show(guild, picker):
         return f"The picker {picker['title']} is saved, but there's no #roles to post it in."
     return f"Done: the picker {picker['title']} is in #roles."
+
+
+def _carry_out_onboarding(guild, a):
+    """Change what's stored; carry_out then writes the page."""
+    data = onboarding.saved(guild)
+    if a["kind"] == ONBOARDING_CHANNELS:
+        data["channels"] = a["channel_ids"]
+        onboarding.save(data)
+        return "Done: new members see the new set of channels."
+    at = next((i for i, q in enumerate(data["questions"])
+               if q["title"] == a.get("question")), None)
+    if a["kind"] == ONBOARDING_REMOVE:
+        del data["questions"][at]
+        onboarding.save(data)
+        return f"Done: new members aren't asked {a['question']} any more."
+    question = {"title": a["title"], "one": a["one"], "options": [
+        {**option, "channels": [c.id for n in option["channels"]
+                                if (c := _find_channel(guild, n))],
+         "roles": [r.id for n in option["roles"]
+                   if (r := discord.utils.get(guild.roles, name=n))]}
+        for option in a["options"]]}
+    if at is None:
+        data["questions"].append(question)
+    else:
+        data["questions"][at] = question
+    onboarding.save(data)
+    return f"Done: new members are asked {a['title']}."
 
 
 async def _carry_out_rule(guild, a):

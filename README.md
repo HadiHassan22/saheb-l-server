@@ -137,7 +137,7 @@ in one of four tiers, fixed in `assistant.py`.
 
 | Tier | Rule | What |
 | --- | --- | --- |
-| Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases |
+| Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases, onboarding |
 | Personal | Only the member asking, who can undo it: done at once | name color; join or leave a role; nickname; an invite link (up to 10 uses, 24 hours, 5 a day) |
 | Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread; pin or unpin a message |
 | Draft | Changes the server for everyone, or acts on a member: a vote | see below |
@@ -149,6 +149,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Channels and categories | create, rename, delete; a channel's topic and slowmode; clear a channel's message history; who can see a channel (everyone, or only members with some roles, made with it if new, which anyone can join) |
 | Roles | create (with a color, and whether members can join it), rename, recolor, delete: always cosmetic |
 | Pickers in `#roles` | create, change, remove a dropdown where members give themselves roles (pick one, or any); new roles are made with it |
+| Onboarding | the questions new members answer when they join (each answer shows channels and/or gives joinable roles), and the channels they see from the start |
 | Emojis | add (from an image attached in `#ask-saheb`), remove |
 | The server | rename it; set its icon |
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
@@ -250,10 +251,41 @@ fit, and the roles it names that don't exist yet are made with it. Joining
 one of a pick-one picker's roles by asking the bot leaves the others. A
 role can also make a channel opt-in: only members who hold it see it.
 
-Every role members can join is always in a picker. One no other picker
-offers is in **Opt-in roles**, a picker the bot keeps itself: a new opt-in
-role, like one for a hidden channel, appears there at once, and leaves it
+Every role members can join is always in a picker. The ones no other
+picker offers are in pickers the bot keeps itself, grouped the way a person
+would: Male and Female go in a **Gender** picker where members pick one,
+and roles that fit no group go in **Opt-in roles**. The AI suggests the
+groups and code checks them (a title of its own, at least two roles, at
+most five groups); they are only worked out again when that set of roles
+changes, and without the AI new roles simply go in Opt-in roles. A new
+opt-in role, like one for a hidden channel, appears at once, and leaves
 when it's deleted, can't be joined any more, or gets a picker of its own.
+Changing one of the bot's groups, or putting a new role in it, makes it an
+ordinary picker.
+
+## Onboarding
+
+On a Community server, Discord asks new members a few questions when they
+join and shows them a set of channels from the start. The bot keeps that
+page (`onboarding.py`). By default new members see the Start here and
+Governance channels, the Hangout channels and the General, Ahwe and Lounge
+voice channels, and are asked:
+
+- **What are you into?** (any): Food, Pets, Gaming, Music, Sports, Movies
+  and TV, Tech, Cars, Study and work, each showing its channels.
+- **What do you want to follow about Lebanon?** (any): News, Politics and
+  religion, Diaspora.
+
+Every picker in `#roles` is asked there too, with the same roles and the
+same pick one or pick any, so a role added later is offered to new members
+at once. The questions and the default channels change like any server
+change, by vote or at once by an admin; a picker's question changes with
+the picker. Channels only some members can see are left out, since
+Discord refuses them, and the default channels keep Discord's minimum of
+7, with 5 everyone can write in. The page is only written when what the
+bot would write changes, so an admin's edit in Discord's own settings stays
+until the next such change. Until the server is a Community server, the
+bot keeps the page ready but can't show it.
 
 ## Voting
 
@@ -422,8 +454,9 @@ one changed, and is told why it wasn't kept.
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
-| `pickers.py` | The pickers in `#roles`, made by vote: one dropdown answers them all |
-| `assistant.py` | What the bot may do when asked: 29 tools, their tiers, the conversation |
+| `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
+| `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
+| `assistant.py` | What the bot may do when asked: 34 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions, with their limits |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |

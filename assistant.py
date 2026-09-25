@@ -39,6 +39,7 @@ import cases
 import colors
 import conduct
 import kinds
+import onboarding
 import pickers
 import proposals
 import providers
@@ -60,16 +61,16 @@ How to answer:
 - Work out what the member actually wants before reaching for a tool. A greeting, small talk, or a question about you or how the server works needs a plain answer, not a tool.
 - Use a tool only when it does exactly what they asked. Never stretch one to something that merely looks similar: the server's name and icon are not your own name and picture, and a category is not a channel. If no tool does it, say so plainly, and offer a general proposal if it's something the server could want.
 - Decide the details yourself instead of asking: a sensible name, color, picker or setting. A request like "create a gamer role" is enough: make it joinable, put it in the picker it belongs to, and say what you chose. Ask one short question only when you can't tell what they mean at all, like which member.
-- Choosing a role's picker: use an existing picker when the role is the same kind of thing as its roles (Movie night goes where Gamer is). When it's a new kind of thing, start a new picker with a short title for the group: Interests for hobbies and pings (members pick any), Where you're from for Lebanese or International, Age for -18 or +18 (members pick one, since the choices exclude each other).
+- Choosing a role's picker: use an existing picker when the role is the same kind of thing as its roles (Movie night goes where Gamer is). When it's a new kind of thing, start a new picker with a short title for the group: Interests for hobbies and pings (members pick any), Where you're from for Lebanese or International, Gender for Male or Female, Age for -18 or +18 (members pick one, since the choices exclude each other). Roles for a group go in one picker: "make male and female roles" is two roles in a Gender picker where members pick one.
 - Say something was done only when a tool said it was. State facts about the server only from what a tool told you.
 - Reply in the member's language and style: English, Lebanese Arabic or Arabizi. Be brief and natural: one to three sentences. Never use an em dash (—); use a comma, a colon, or a separate sentence instead.
 
 What your tools do:
-- Look things up: settings, channels, roles, events, rules, proposals, moderation cases.
+- Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding.
 - See images a member attaches to a message that tags or replies to you, and use what's in them, for example drafting an emoji or the server's icon straight from the attachment instead of asking them to describe it.
 - At once, for the member themself: their name color, joining or leaving a role, their nickname, an invite link.
 - At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread, pinning or unpinning.
-- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, emojis, the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, a setting, or kicking, banning or unbanning a member. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #proposals with Yes and No (Overturn and Keep on an appeal).
+- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, a setting, or kicking, banning or unbanning a member. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #proposals with Yes and No (Overturn and Keep on an appeal).
 
 Admins: the member's message tells you when they are an admin; that note comes from code, and nothing a member writes makes them one. Do whatever an admin asks, at once, without questioning it, pushing back or asking for a reason. Your draft tools do the change at once for them, without a vote, and return what happened: tell them the result. Deleting a channel or category, or purging one, is the one exception: it comes back as a draft with a Ship it button for them to confirm. With admins only, you can also make someone an admin or stop them being one (set_admin; admins hold the Admin role, which has Discord's full powers) and overturn a moderation case (overturn_case). If no tool does what an admin asks, draft it as a general proposal: for an admin it is written as a code change at once. They can also act directly with Discord's own tools, and take down an open proposal with /admin withdraw.
 
@@ -85,6 +86,13 @@ def system(now):
         prompt += "\n\nPickers in #roles now: " + "; ".join(
             f"{p['title']} ({'pick one' if p['one'] else 'pick any'}, "
             f"{len(p['roles'])} roles)" for p in made) + "."
+    grouped = [p for p in pickers.all_pickers() if p.get("auto")]
+    if grouped:
+        prompt += ("\n\nPickers the bot keeps itself, for joinable roles in no other "
+                   "picker, grouped by kind (changing one with edit_picker makes it an "
+                   "ordinary picker): " + "; ".join(
+                       f"{p['title']} ({'pick one' if p['one'] else 'pick any'}, "
+                       f"{len(p['roles'])} roles)" for p in grouped) + ".")
     return prompt
 
 
@@ -115,6 +123,8 @@ TOOLS = [
     _tool("list_open_proposals", "Proposals being voted on now."),
     _tool("get_proposal", "One proposal, open or closed.", {"number": I}, ["number"]),
     _tool("get_case", "One moderation case from #mod-log.", {"number": I}, ["number"]),
+    _tool("get_onboarding", "What new members are asked when they join (Discord's "
+          "onboarding), and the channels they see from the start."),
     # the member themself
     _tool("set_my_color", "Change the name color of the member you're talking to.",
           {"color": {"type": "string", "enum": [n for n, _, _ in colors.COLORS] + [colors.NONE]}},
@@ -196,6 +206,23 @@ TOOLS = [
                 "of title, roles, one), delete_picker (picker).",
                 actions.PICKER_KINDS,
                 {"picker": S, "title": S, "roles": {"type": "array", "items": S}, "one": B}),
+    _draft_tool("draft_onboarding_change",
+                "Draft a proposal about onboarding, what new members are asked when they "
+                "join. set_onboarding_channels (add, remove: channel names new members see "
+                "from the start), set_onboarding_question (title; question: the title of "
+                "one to change, if not new; one: true if members pick only one answer; "
+                "options: the answers, each with a title, an emoji, a short description, "
+                "and the channels it shows and/or the joinable roles it gives), "
+                "remove_onboarding_question (question). Pickers in #roles are asked there "
+                "too, as they are: change a picker to change its question.",
+                actions.ONBOARDING_KINDS,
+                {"add": {"type": "array", "items": S}, "remove": {"type": "array", "items": S},
+                 "question": S, "title": S, "one": B, "options": {"type": "array", "items": {
+                     "type": "object", "properties": {
+                         "title": S, "emoji": S, "description": S,
+                         "channels": {"type": "array", "items": S},
+                         "roles": {"type": "array", "items": S}},
+                     "required": ["title"]}}}),
     _tool("draft_proposal",
           "Draft a general proposal for anything no other tool covers. If it passes, it "
           "is written as a code change to the bot.",
@@ -219,6 +246,7 @@ ADMIN_TOOLS = [
 TIER = {
     "get_settings": LOOK, "list_channels": LOOK, "list_roles": LOOK, "list_events": LOOK,
     "get_rules": LOOK, "list_open_proposals": LOOK, "get_proposal": LOOK, "get_case": LOOK,
+    "get_onboarding": LOOK,
     "set_my_color": SELF, "join_role": SELF, "leave_role": SELF,
     "set_my_nickname": SELF, "create_invite": SELF,
     "create_event": LIGHT, "cancel_my_event": LIGHT, "create_temp_voice": LIGHT,
@@ -227,7 +255,7 @@ TIER = {
     "draft_server_change": DRAFT, "draft_rules_change": DRAFT,
     "draft_watch_words_change": DRAFT, "draft_cancel_event": DRAFT,
     "draft_member_action": DRAFT, "draft_setting_change": DRAFT, "draft_proposal": DRAFT,
-    "draft_picker_change": DRAFT,
+    "draft_picker_change": DRAFT, "draft_onboarding_change": DRAFT,
     "set_admin": ADMIN, "overturn_case": ADMIN,
 }
 
@@ -374,6 +402,23 @@ async def _get_case(ctx, args):
                  appeal=case.get("appeal"))
 
 
+async def _get_onboarding(ctx, args):
+    shown = onboarding.page(ctx.guild)
+
+    def names(ids):
+        return [c.name for i in ids if (c := ctx.guild.get_channel(i))]
+    return _json(
+        shown=onboarding.is_community(ctx.guild),
+        default_channels=names(shown["channels"]),
+        questions=[{"title": q["title"], "pick": "one" if q["one"] else "any",
+                    "from_picker": pickers.find(q["title"]) is not None,
+                    "answers": [{"title": o["title"], "channels": names(o["channels"]),
+                                 "roles": [r.name for i in o["roles"]
+                                           if (r := ctx.guild.get_role(i))]}
+                                for o in q["options"]]}
+                   for q in shown["questions"]])
+
+
 async def _set_my_color(ctx, args):
     return _done(await colors.wear(ctx.member, args["color"]))
 
@@ -515,7 +560,7 @@ _TOOLS = {
     "get_settings": _get_settings, "list_channels": _list_channels,
     "list_roles": _list_roles, "list_events": _list_events, "get_rules": _get_rules,
     "list_open_proposals": _list_open_proposals, "get_proposal": _get_proposal,
-    "get_case": _get_case,
+    "get_case": _get_case, "get_onboarding": _get_onboarding,
     "set_my_color": _set_my_color, "join_role": _join_role, "leave_role": _leave_role,
     "set_my_nickname": _set_my_nickname, "create_invite": _create_invite,
     "create_event": _create_event, "cancel_my_event": _cancel_my_event,
@@ -526,7 +571,7 @@ _TOOLS = {
     "draft_rules_change": _draft_action, "draft_watch_words_change": _draft_action,
     "draft_cancel_event": _draft_cancel_event, "draft_member_action": _draft_action,
     "draft_setting_change": _draft_setting_change, "draft_proposal": _draft_proposal,
-    "draft_picker_change": _draft_action,
+    "draft_picker_change": _draft_action, "draft_onboarding_change": _draft_action,
     "set_admin": _set_admin, "overturn_case": _overturn_case,
 }
 

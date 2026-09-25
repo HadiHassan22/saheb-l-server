@@ -9,22 +9,32 @@ change. Picking only adds and removes that picker's roles, which are made
 by vote and carry no powers. The name colors have their own picker
 (colors.py).
 
-Every role members can join that no other picker offers is offered in
-"Opt-in roles", a picker the bot keeps itself (`sync_opt_in`): a role made
-opt-in, like one that opens a channel, can always be taken in #roles.
+Every role members can join that no other picker offers is still offered
+in #roles, in pickers the bot keeps itself (`sync_opt_in`), so a role made
+opt-in, like one that opens a channel, can always be taken. The bot groups
+them the way a person would: Male and Female go in a Gender picker where
+members pick one, and roles that fit no group go in "Opt-in roles". The AI
+suggests the groups and code checks them; without the AI, new roles go in
+Opt-in roles and the groups already made stay. An admin or a vote can take
+one of these pickers over by changing it (actions.py).
+
+Discord's onboarding asks new members the same questions (onboarding.py).
 """
 
 import logging
 
 import discord
 
+import ai
 import layout
+import providers
 import store
 
 log = logging.getLogger("pickers")
 
 MAX_PICKERS = 10
 MAX_ROLES = 24  # a dropdown holds 25 options, and one is "None of these"
+MAX_GROUPS = 5  # pickers the bot makes itself, besides Opt-in roles
 NONE = "none"
 OPT_IN = "Opt-in roles"
 
@@ -81,7 +91,7 @@ def changes(held, chosen, picker):
 
 def text(picker):
     how = "Pick one." if picker["one"] else "Pick any that fit."
-    if picker.get("auto"):
+    if picker.get("auto") and picker["title"].startswith(OPT_IN):
         how = "Pick any you want. Some open a channel that only their holders see."
     return f"**{picker['title']}**\n{how}"[:2000]
 
@@ -91,24 +101,103 @@ def made_by_members():
     return [p for p in all_pickers() if not p.get("auto")]
 
 
+GROUPING_SCHEMA = {
+    "type": "object",
+    "properties": {"groups": {"type": "array", "items": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}, "one": {"type": "boolean"},
+                       "roles": {"type": "array", "items": {"type": "integer"}}},
+        "required": ["title", "one", "roles"]}}},
+    "required": ["groups"],
+}
+
+
+def grouping_prompt(names, taken, before):
+    """What the AI is asked. `names` are the roles to group, numbered from
+    1; `taken`, titles already used by other pickers; `before`, the groups
+    as they were, as (title, one, names)."""
+    listed = "\n".join(f"{n}. {name}" for n, name in enumerate(names, 1))
+    kept = "".join(f"\n- {title} ({'pick one' if one else 'pick any'}): {', '.join(roles)}"
+                   for title, one, roles in before)
+    return f"""A Discord server has a #roles channel where members give themselves roles from dropdowns ("pickers"). These roles are in no picker yet:
+{listed}
+
+Group roles that are the same kind of thing under a short title a member would expect, like Gender, Age, Pronouns, Where you're from or Interests. Set "one" to true when a member should hold only one role of the group because the choices exclude each other (Male and Female, age groups); false when a member may hold several (hobbies, games, notifications). A group needs at least two roles. Leave out any role that fits no group; it goes in a general "{OPT_IN}" picker. Don't use these titles: {", ".join([OPT_IN, *taken])}.
+{("Keep these groups where the roles still fit, so members aren't surprised:" + kept) if kept else ""}
+Answer with the groups, each listing its roles by number."""
+
+
+def _groups(answer, count, taken):
+    """The AI's groups, checked: [(title, one, [indexes])], each role in at
+    most one group, two to MAX_ROLES roles each, titles fresh and short."""
+    groups, used = [], set()
+    taken = {t.lower() for t in [*taken, OPT_IN]}
+    for group in (answer or {}).get("groups") or []:
+        title = str(group.get("title") or "").strip()[:45]
+        picked = [n - 1 for n in dict.fromkeys(group.get("roles") or [])
+                  if isinstance(n, int) and 1 <= n <= count and n - 1 not in used]
+        if not title or title.lower() in taken or not 2 <= len(picked) <= MAX_ROLES:
+            continue
+        groups.append((title, bool(group.get("one")), picked))
+        used.update(picked)
+        taken.add(title.lower())
+        if len(groups) == MAX_GROUPS:
+            break
+    return groups
+
+
+async def _grouped(guild, wanted):
+    """[(title, one, [role ids])] for the roles in `wanted`, the ones in no
+    group last under Opt-in roles. The groups are remembered for this set
+    of roles, so the AI is only asked again when it changes."""
+    saved = store.load("groups", {"roles": [], "groups": []})
+    taken = [p["title"] for p in made_by_members()]
+    before = [(g["title"], g["one"], [r for r in g["roles"] if r in wanted])
+              for g in saved["groups"]]
+    before = [g for g in before if len(g[2]) >= 2
+              and g[0].lower() not in {t.lower() for t in taken}]
+    if sorted(saved["roles"]) != sorted(wanted) and len(wanted) >= 2:
+        names = [guild.get_role(r).name for r in wanted]
+        hint = [(t, one, [guild.get_role(r).name for r in roles]) for t, one, roles in before]
+        try:
+            answer = await ai.review(grouping_prompt(names, taken, hint), GROUPING_SCHEMA)
+            before = [(t, one, [wanted[i] for i in picked])
+                      for t, one, picked in _groups(answer, len(wanted), taken)]
+            store.save("groups", {"roles": wanted, "groups": [
+                {"title": t, "one": one, "roles": roles} for t, one, roles in before]})
+        except ai.Unavailable as e:
+            log.info(f"the opt-in roles weren't grouped: {e}")
+        except (providers.ProviderError, ValueError, TypeError, AttributeError) as e:
+            # Not remembered either way, so the next change asks again.
+            log.warning(f"the opt-in roles weren't grouped: {e!r}")
+    grouped = {r for _, _, roles in before for r in roles}
+    rest = [r for r in wanted if r not in grouped]
+    chunks = [rest[i:i + MAX_ROLES] for i in range(0, len(rest), MAX_ROLES)]
+    return before + [(OPT_IN if i == 0 else f"{OPT_IN} ({i + 1})", False, chunk)
+                     for i, chunk in enumerate(chunks)]
+
+
 async def sync_opt_in(guild, joinable):
     """Offer every role in `joinable` (ids of roles members can join) that
-    no other picker offers in the Opt-in roles picker, split in two or more
-    if there are more than a dropdown holds. It appears when the first such
-    role does and goes when the last one does."""
+    no other picker offers, in the pickers the bot keeps: groups of roles
+    that go together, then Opt-in roles, split in two or more past what a
+    dropdown holds. A picker appears when its first role does and goes
+    when its last one does."""
     offered = {r for p in made_by_members() for r in p["roles"]}
     wanted = sorted((r for r in joinable if r not in offered and guild.get_role(r)),
                     key=lambda r: guild.get_role(r).name.lower())
-    chunks = [wanted[i:i + MAX_ROLES] for i in range(0, len(wanted), MAX_ROLES)]
+    groups = await _grouped(guild, wanted)
     kept = sorted((p for p in all_pickers() if p.get("auto")), key=lambda p: p["no"])
-    for i, chunk in enumerate(chunks):
-        title = OPT_IN if i == 0 else f"{OPT_IN} ({i + 1})"
-        picker = kept[i] if i < len(kept) else {"no": None, "message_id": None,
-                                                "auto": True, "one": False}
-        if picker.get("roles") != chunk or picker.get("title") != title:
-            picker.update(title=title, roles=chunk)
+    # The same title keeps the same message in #roles; others are reused in turn.
+    by_title = {p["title"]: p for p in kept}
+    spare = [p for p in kept if p["title"] not in {title for title, _, _ in groups}]
+    for title, one, roles in groups:
+        picker = by_title.get(title) or (spare.pop(0) if spare else
+                                         {"no": None, "message_id": None, "auto": True})
+        if (picker.get("roles"), picker.get("title"), picker.get("one")) != (roles, title, one):
+            picker.update(title=title, roles=roles, one=one)
             await show(guild, save(picker))
-    for extra in kept[len(chunks):]:
+    for extra in spare:
         await hide(guild, extra)
         forget(extra["no"])
 

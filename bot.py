@@ -28,6 +28,7 @@ import guard  # noqa: E402
 import health  # noqa: E402
 import layout  # noqa: E402
 import moderator  # noqa: E402
+import onboarding  # noqa: E402
 import pickers  # noqa: E402
 import quick  # noqa: E402
 import setting_changes  # noqa: E402, F401
@@ -103,6 +104,9 @@ class Bot(discord.Client):
             await layout.build(home)
             await pickers.install(home)
             await actions.offer_opt_in(home)
+            problem = await onboarding.sync(home)
+            if problem:
+                log.info(f"onboarding: {problem}")
             await admins.log_channel(home)
             await guard.sweep(home, self.report)
         except discord.HTTPException as e:
