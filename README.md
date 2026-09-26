@@ -126,13 +126,20 @@ Safety Setup), the bot uses that channel as `#rules` and deletes the one
 it built, if only the bot ever posted there. It runs one server: the
 first one it's invited to becomes its home, and it leaves any other.
 
+## The daily greeting
+
+In one channel (id 1551963729627971617), the bot replies "ija el batal"
+to each member's first message of the day. One greeting per member per
+day, in that channel alone. It only notices who posted and when, never
+what the message says.
+
 ## Talking to the bot
 
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
 answers in the language they use, never using an em dash. It answers only
 messages that tag it or reply to it, so members can also talk to each
-other there. It is the only channel where the bot reads ordinary
-messages. If such a message has an image attached, the bot can see it too
+other there. It is the only channel where the bot reads what ordinary
+messages say. If such a message has an image attached, the bot can see it too
 (up to 3 images, 5 MB each) and use what's in it, for example drafting an
 emoji or the server's icon straight from the attachment. The model
 understands the request, and code decides what is allowed: every tool is
@@ -470,6 +477,7 @@ one changed, and is told why it wasn't kept.
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
+| `greetings.py` | The daily "ija el batal" greeting in one channel |
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |

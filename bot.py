@@ -24,6 +24,7 @@ import appeals  # noqa: E402
 import chat  # noqa: E402
 import code_changes  # noqa: E402, F401  (each kind of proposal registers itself: kinds.py)
 import colors  # noqa: E402
+import greetings  # noqa: E402
 import guard  # noqa: E402
 import health  # noqa: E402
 import layout  # noqa: E402
@@ -52,7 +53,8 @@ class Bot(discord.Client):
         # Privileged: switch it on in the developer portal (Bot -> Message
         # Content Intent). It lets the moderator read a flagged message and
         # the few before it, and the bot answer in #ask-saheb. Messages
-        # anywhere else are never read.
+        # anywhere else are never read; the daily greeting only notices who
+        # posted, never what they said.
         intents.message_content = True
         # Privileged too (Bot -> Server Members Intent). It lets the bot see
         # who is in the server, so a proposal's quorum counts people and not
@@ -160,6 +162,7 @@ class Bot(discord.Client):
         await moderator.on_automod_action(execution)
 
     async def on_message(self, message):
+        await greetings.on_message(message)
         await chat.on_message(message, self)
 
 
