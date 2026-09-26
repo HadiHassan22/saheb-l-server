@@ -5,6 +5,11 @@ member, and posts the case in #mod-log. Also the owner's /ai-key.
 The bot never reads messages AutoMod did not flag. For a flagged one it
 reads the few messages before it, because the same word is a joke in one
 conversation and an attack in another.
+
+A message with one of the sectarian watch words is handled with care:
+inside #politics-and-religion, where that talk belongs, nothing happens at
+all, and elsewhere it is classified first and only passed on when it is
+clearly very sectarian, inflammatory or inciting (see judge.py).
 """
 
 import asyncio
@@ -17,6 +22,7 @@ from discord import app_commands
 
 import ai
 import appeals
+import automod
 import cases
 import conduct
 import judge
@@ -90,8 +96,27 @@ async def handle(execution):
     if last and time.time() - last < COOLDOWN:
         return
     channel = execution.channel or await guild.fetch_channel(execution.channel_id)
+    talk = automod.sectarian_hit(execution.content)
+    if talk:
+        politics = layout.channel(guild, "politics-and-religion")
+        if politics is not None and (channel.id == politics.id
+                                     or getattr(channel, "parent_id", None) == politics.id):
+            return  # where that talk belongs: inside, nothing is flagged
     lines = await _context(channel, execution.message_id)
     state = judge.state(lines, member.display_name, execution.content[:1000])
+    if talk:
+        # Outside its channel, only clearly very sectarian, inflammatory or
+        # inciting talk is judged; mild, passing or joking mentions are let
+        # through, so ordinary conversation is not caught.
+        try:
+            answers = await ai.first_check(state, judge.sectarian_questions())
+            found = judge.sectarian(answers)
+        except ai.Unavailable as e:
+            return await _paused(guild, str(e))
+        except providers.ProviderError as e:
+            return log.warning(f"sectarian talk check failed: {e}")
+        if not judge.escalates(found, settings.current()):
+            return
 
     try:
         screening = judge.screen(await ai.first_check(state, judge.questions()))

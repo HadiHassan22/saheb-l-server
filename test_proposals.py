@@ -46,6 +46,7 @@ class Settings(WithTempData):
             "warning_days": 30, "warnings_before_timeout": 3,
             "first_timeout_minutes": 60, "repeat_timeout_hours": 24,
             "timeouts_before_ban": 2, "act_percent": 80, "review_percent": 30,
+            "sectarian_percent": 80,
         })
 
     def test_values_outside_the_bounds_are_refused(self):

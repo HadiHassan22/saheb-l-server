@@ -541,7 +541,8 @@ def _check_watch(action):
         if len(community["added"]) + len(words) > 1000:
             return "The watch list added by vote is full."
     else:
-        known = set(automod.ENGLISH) | set(automod.ARABIC) | set(community["added"])
+        known = (set(automod.ENGLISH) | set(automod.ARABIC) | set(automod.SECTARIAN)
+                 | set(community["added"]))
         if any(w in set(automod.BLOCK_WORDS) for w in words):
             return "Blocked words are part of the safety floor and can't be removed."
         missing = [w for w in words if w not in known]

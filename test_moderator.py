@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import discord
+
 import ai
 import cases
 import layout
@@ -95,14 +97,24 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.mkdtemp()
         store.DATA_DIR = Path(self._tmp)
         self.log = Sent()
+        self.politics = None
         self.patches = [
-            mock.patch.object(layout, "channel", lambda guild, name: self.log),
+            mock.patch.object(layout, "channel", self.channel_of),
             mock.patch.object(ai, "review", self.fake_review),
         ]
         for p in self.patches:
             p.start()
         self.reviews = []
         self.review_answer = {}
+
+    def channel_of(self, guild, name):
+        return self.log if name == "mod-log" else self.politics
+
+    def politics_channel(self, channel_id):
+        politics = mock.Mock(spec=discord.TextChannel)
+        politics.id = channel_id
+        self.politics = politics
+        return politics
 
     def tearDown(self):
         for p in self.patches:
@@ -203,6 +215,60 @@ class Flow(unittest.IsolatedAsyncioTestCase):
                 await moderator.handle(alert(Member(), Channel([]), "x"))
         self.assertEqual(len(self.log.sent), 1)
         self.assertIn("paused", self.log.sent[0])
+
+    async def run_sectarian(self, talk, content, screening=None, channel=None):
+        """Handle an alert with a sectarian watch word. The first check is
+        asked the sectarian check first, and only if that passes the usual
+        questions."""
+        channel = channel or Channel([("rami", "say that again"), ("karim", content)])
+        answers = [talk] + ([screening] if screening is not None else [])
+        with mock.patch.object(ai, "first_check",
+                               mock.AsyncMock(side_effect=answers)) as first:
+            await moderator.handle(alert(Member(), channel, content))
+        return channel, first
+
+    async def test_sectarian_talk_in_the_politics_channel_is_left_alone(self):
+        channel = Channel([("karim", "ya zionist")])
+        self.politics_channel(channel.id)
+        _, first = await self.run_sectarian(
+            {"topic": {"noul": 0.99}, "severity": {"score": 2.9}},
+            "ya zionist", channel=channel)
+        self.assertEqual(first.await_count, 0)  # not even classified
+        self.assertIsNone(cases.get(1))
+        self.assertEqual((self.log.sent, self.reviews), ([], []))
+
+    async def test_a_thread_in_the_politics_channel_is_left_alone_too(self):
+        channel = Channel([("karim", "ya zionist")])
+        channel.parent_id = self.politics_channel(70).id
+        _, first = await self.run_sectarian(
+            {"topic": {"noul": 0.99}, "severity": {"score": 2.9}},
+            "ya zionist", channel=channel)
+        self.assertEqual(first.await_count, 0)
+        self.assertIsNone(cases.get(1))
+
+    async def test_a_mild_mention_is_let_through(self):
+        self.politics_channel(70)
+        _, first = await self.run_sectarian(
+            {"topic": {"noul": 0.95}, "severity": {"score": 1.2}},
+            "ya zionist lol", screening=jev(1.8, hate=0.9))
+        self.assertEqual(first.await_count, 1)  # classified, then let through
+        self.assertIsNone(cases.get(1))
+        self.assertEqual((self.log.sent, self.reviews), ([], []))
+
+    async def test_clearly_inflammatory_talk_is_judged_as_a_normal_case(self):
+        self.review_answer = {"explanation": "Attacked a community with a slogan."}
+        self.politics_channel(70)
+        channel, first = await self.run_sectarian(
+            {"topic": {"noul": 0.95}, "severity": {"score": 2.6}},
+            "ya zionist, death to israel", screening=jev(1.8, hate=0.9))
+        self.assertEqual(first.await_count, 2)
+        case = cases.get(1)
+        self.assertEqual((case["action"], case["rule"], case["severity"]),
+                         (cases.WARN, 2, "serious"))
+        self.assertTrue(case["deleted"])
+        self.assertEqual(channel.deleted, [123])
+        self.assertIn("Attacked a community", case["explanation"])
+        self.assertIn("Attacked a community", self.log.sent[0].description)
 
 
 if __name__ == "__main__":

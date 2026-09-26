@@ -13,9 +13,17 @@ rule holds at most 10. Keywords match whole words unless wrapped in `*`.
 Arabic prefixes (ال، و، ب) attach to the word, so distinctive Arabic stems
 are wrapped; short or common ones are not, because `*نيك*` also matches
 "تكنيك".
+
+SECTARIAN is narrower still: sect and community slurs, inflammatory
+political slogans and religious insults, the flashpoints of Lebanese talk.
+Ordinary political vocabulary (party names, politicians, beliefs) is left
+out on purpose. Those words mean nothing inside #politics-and-religion,
+where that talk belongs, and outside it the message is classified before
+anything happens to it (judge.py).
 """
 
 import logging
+import re
 
 import discord
 
@@ -69,6 +77,21 @@ ARABIZI = [
     r"(?i)\by[ie]?l?3an\s*(deen|din|rab+|allah|emm|omm)",
 ]
 
+# Sect and community slurs, inflammatory political slogans and religious
+# insults: a narrow list of sectarian and political flashpoints, not
+# general political vocabulary. Only watched, never blocked, and only
+# outside #politics-and-religion (see the module docstring).
+SECTARIAN = [
+    "wahhabi", "wahabi", "safawi", "rafidhi", "nawasib", "majoos",
+    "crusader", "crusaders", "zionist", "zionists",
+    "apostate", "apostates", "heretic", "heretics",
+    "death to america", "death to israel", "party of satan",
+    "*وهابي*", "*صهيوني*", "*صهاين*", "*ارهابي*", "*إرهابي*",
+    "*مرتد*", "*زنديق*", "*زنادق*",
+    "حزب الشيطان", "*الموت لأمريكا*", "*الموت لامريكا*",
+    "*الموت لاسرائيل*", "*الموت لإسرائيل*",
+]
+
 # Blocked outright, then still judged. Scam lures and Lebanese phone
 # numbers, the most common kind of doxxing here.
 BLOCK_WORDS = [
@@ -96,6 +119,27 @@ def save_community_words(words):
     store.save("watch_words", words)
 
 
+def sectarian_words():
+    """SECTARIAN as it is watched: less any word a vote removed."""
+    removed = set(community_words()["removed"])
+    return [w for w in SECTARIAN if w not in removed]
+
+
+def sectarian_hit(text):
+    """True when `text` uses one of the sectarian watch words. Matches the
+    way Discord matches keywords: whole words unless the word is wrapped
+    in `*`, and case does not matter."""
+    lowered = text.casefold()
+    for word in sectarian_words():
+        stem = word.strip("*")
+        if word.startswith("*"):
+            if stem in lowered:
+                return True
+        elif re.search(rf"(?<!\w){re.escape(stem)}(?!\w)", lowered):
+            return True
+    return False
+
+
 def plan():
     """(name, trigger, block) for every rule the bot keeps. Names are how
     the bot recognises its own rules again on the next start."""
@@ -114,6 +158,8 @@ def plan():
     return rules + [
         (PREFIX + "watch Arabizi",
          discord.AutoModTrigger(type=T.keyword, regex_patterns=ARABIZI), False),
+        (PREFIX + "watch sectarian talk", discord.AutoModTrigger(
+            type=T.keyword, keyword_filter=sectarian_words()), False),
         (PREFIX + "block scams and phone numbers",
          discord.AutoModTrigger(type=T.keyword, keyword_filter=BLOCK_WORDS,
                                 regex_patterns=BLOCK_PATTERNS), True),

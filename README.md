@@ -313,19 +313,27 @@ AutoMod is the net, and the bot is the judge:
    without removing anything. A few things are blocked immediately and
    then judged: scam lures, Lebanese phone numbers, slurs, sexual content,
    mass mentions and spam.
-2. **A fast first check.** [Jev](https://openrouter.ai/typesafe/jev-1.13)
+2. **Sectarian talk stays in its channel.** A narrow watch list of sect
+   and community slurs, inflammatory political slogans and religious
+   insults is flagged only outside `#politics-and-religion`; inside it,
+   nothing changes. Before one of those messages goes any further, an LLM
+   classifies whether it is actually sectarian, political or religious
+   talk, and how severe. Only what is clearly very sectarian, inflammatory
+   or inciting is judged as a case below; mild, passing or joking mentions
+   are let through, so ordinary conversation is not caught.
+3. **A fast first check.** [Jev](https://openrouter.ai/typesafe/jev-1.13)
    reads the flagged message and the eight before it, and answers yes/no
    questions (harassment, hate, threats, doxxing, sexual content, scams,
    self-harm, and whether the message is talking to the moderator), plus
    how severe it is. It costs about $0.00002 a message, which is why the
    watch lists can afford to be broad.
-3. **Routing, by Jev's highest score:**
+4. **Routing, by Jev's highest score:**
    - **80% or more:** Jev's verdict stands. Claude Haiku writes the public
      explanation of the decision but cannot overrule it.
    - **30% to 80%, or the message talks to the moderator:** Jev is unsure,
      so Haiku reviews the conversation and decides.
    - **Under 30%:** cleared. Nothing happens and nothing is posted.
-4. **The sanction is picked in code**, never by a model, from the severity
+5. **The sanction is picked in code**, never by a model, from the severity
    and the member's record over the last 30 days:
    - mild: a warning; after 3 warnings, a timeout
    - serious: a warning with the message deleted; with any record, a
@@ -333,7 +341,7 @@ AutoMod is the net, and the bot is the judge:
      ban
    - severe (threats, doxxing, anything sexual involving minors, scams): a
      ban
-5. **Everything is public.** The member gets a DM, and `#mod-log` gets the
+6. **Everything is public.** The member gets a DM, and `#mod-log` gets the
    case: the rule, the explanation, the member's record, Jev's score, and
    which judge decided. The flagged message is quoted behind a spoiler,
    except for private information, sexual content and scam links, which
@@ -358,6 +366,7 @@ Every number above is a setting the community can change by vote:
 | Timeouts before a ban | 2 | 1 to 10 |
 | How sure the first check must be to act alone | 80% | 50% to 99% |
 | How likely a message must look to get a second look | 30% | 10% to 90% |
+| How sure the sectarian talk check must be to pass a message on | 80% | 50% to 99% |
 
 The ranges are set in code, not by a vote on a setting. A code change can
 widen a range; only one an admin shipped can narrow or remove one.
