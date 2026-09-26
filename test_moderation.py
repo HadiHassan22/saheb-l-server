@@ -111,6 +111,31 @@ class Review(unittest.TestCase):
         self.assertIsNone(judge.verdict({}))
 
 
+class SectarianTalk(unittest.TestCase):
+    def test_the_check_asks_the_topic_and_the_severity(self):
+        asked = judge.sectarian_questions()
+        self.assertEqual(set(asked), {"topic", "severity"})
+        self.assertEqual(asked["severity"]["type"], "score")
+        self.assertEqual(len(asked["severity"]["criteria"]), 4)
+        self.assertTrue(asked["topic"]["criteria"]["true"]
+                        and asked["topic"]["criteria"]["false"])
+
+    def found(self, topic=0.95, severity=1.0):
+        return judge.sectarian({"topic": {"noul": topic}, "severity": {"score": severity}})
+
+    def test_only_clearly_inflammatory_talk_is_passed_on(self):
+        self.assertFalse(judge.escalates(self.found(severity=1.2), DEFAULTS))  # a joke
+        self.assertFalse(judge.escalates(self.found(topic=0.2, severity=2.8), DEFAULTS))
+        self.assertTrue(judge.escalates(self.found(severity=2.1), DEFAULTS))
+        self.assertTrue(judge.escalates(self.found(severity=2.8), DEFAULTS))
+        self.assertFalse(judge.escalates(judge.sectarian({}), DEFAULTS))  # never a guess
+
+    def test_the_dial_moves_the_gate(self):
+        talk = self.found(topic=0.6, severity=2.5)
+        self.assertFalse(judge.escalates(talk, dict(DEFAULTS, sectarian_percent=80)))
+        self.assertTrue(judge.escalates(talk, dict(DEFAULTS, sectarian_percent=50)))
+
+
 class Sanctions(unittest.TestCase):
     def check(self, severity, record, action, minutes=0, delete=None):
         got = judge.sanction(severity, record, DEFAULTS)
@@ -172,7 +197,8 @@ class Records(unittest.TestCase):
 
 class AutoModLists(unittest.TestCase):
     def test_keywords_fit_discords_limits(self):
-        for words in (automod.ENGLISH, automod.ARABIC, automod.BLOCK_WORDS):
+        for words in (automod.ENGLISH, automod.ARABIC, automod.SECTARIAN,
+                      automod.BLOCK_WORDS):
             self.assertLessEqual(len(words), 1000)
             self.assertEqual(len(words), len(set(words)), "duplicate keyword")
             for word in words:
@@ -200,6 +226,19 @@ class AutoModLists(unittest.TestCase):
         self.assertTrue(blocked("+961 71 234 567"))
         self.assertFalse(blocked("it costs 70 000 000 LL"))
         self.assertFalse(blocked("70,000,000"))
+
+    def test_sectarian_words_are_watched_but_never_blocked(self):
+        rules = {name: block for name, _, block in automod.plan()}
+        self.assertFalse(rules[automod.PREFIX + "watch sectarian talk"])
+
+    def test_sectarian_hit_finds_the_words_but_not_ordinary_talk(self):
+        caught = ["ya wahhabi", "he is a rafidhi", "Death to America!",
+                  "the party of satan", "حزب الشيطان", "يا زنديق", "الموت لأمريكا"]
+        for text in caught:
+            self.assertTrue(automod.sectarian_hit(text), text)
+        for text in ("hezbollah won the election", "I go to church in jounieh",
+                     "the government fell again", "ya 7mar"):
+            self.assertFalse(automod.sectarian_hit(text), text)
 
     def test_plan_names_are_unique_and_prefixed(self):
         import discord  # only here: the lists above need no discord

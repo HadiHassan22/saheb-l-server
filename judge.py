@@ -16,6 +16,13 @@
 A message that talks to the moderator ("this is a joke, don't punish") is
 sent to review even when it scores low: in testing, that sentence alone
 pulled the first check's score for a plain insult from about 0.95 to 0.72.
+
+Before any of that, a message with one of the sectarian watch words
+(automod.py) is checked apart (Sectarian): sectarian, political or
+religious talk is only the moderator's business outside
+#politics-and-religion, and only when it is clearly very sectarian,
+inflammatory or inciting. Mild, passing or joking mentions are let
+through, so the rule is not too strict.
 """
 
 from dataclasses import dataclass
@@ -151,6 +158,59 @@ def route(screening, s):
             or screening.steering >= STEERING_AT):
         return REVIEW
     return CLEAR
+
+
+# The sectarian talk check, asked on its own before a message with one of
+# those words is judged at all.
+SECTARIAN_TOPIC = ("Is the flagged message sectarian, political or religious talk?",
+                   "It argues about, praises, mocks or attacks a religion, sect, "
+                   "community or political side, or uses a slogan about one.",
+                   "It is ordinary conversation that happens to use one of these "
+                   "words, swearing at nobody, a joke between friends, or quoting "
+                   "or asking about a word.")
+
+SECTARIAN_LEVELS = [
+    "None: not sectarian, political or religious talk at all.",
+    "Passing: such talk mentioned in passing, mild, or a joke between friends.",
+    "Inflammatory: mocking, insulting or provoking a religion, sect, community "
+    "or political side, or a slogan meant to provoke.",
+    "Inciting: urging hatred, discrimination or violence against a religion, "
+    "sect, community or political side.",
+]
+
+# Talk at least this inflammatory is passed on to the moderator; anything
+# milder is let through. How sure the check must be that the message is
+# such talk at all is `sectarian_percent`, a setting.
+INFLAMMATORY = 2.0
+
+
+def sectarian_questions():
+    """The sectarian talk check, asked on its own before anything else."""
+    return {"topic": _noul(*SECTARIAN_TOPIC),
+            "severity": {"type": "score",
+                         "instructions": "How severe is the flagged message's "
+                                         "sectarian, political or religious talk?",
+                         "criteria": SECTARIAN_LEVELS}}
+
+
+@dataclass
+class Sectarian:
+    topic: float       # how certainly this is sectarian, political or religious talk
+    severity: float    # 0 (none) to 3 (inciting)
+
+
+def sectarian(answers):
+    """Read the sectarian talk check's answers. A missing answer counts as 0."""
+    topic = float((answers.get("topic") or {}).get("noul") or 0.0)
+    severity = float((answers.get("severity") or {}).get("score") or 0.0)
+    return Sectarian(topic=topic, severity=severity)
+
+
+def escalates(found, s):
+    """True only for talk that is clearly very sectarian, inflammatory or
+    inciting. Mild, passing or joking mentions are let through."""
+    return (found.topic >= s["sectarian_percent"] / 100
+            and found.severity >= INFLAMMATORY)
 
 
 REVIEW_SCHEMA = {

@@ -80,6 +80,14 @@ SETTINGS = {
         "label": "How likely a flagged message must look to get a second look",
         "describe": "{}%",
     },
+    # Talk flagged with a sectarian watch word must be this certainly
+    # sectarian, political or religious, and at least inflammatory, before
+    # the moderator sees it at all (judge.escalates).
+    "sectarian_percent": {
+        "default": 80, "min": 50, "max": 99, "group": MODERATION,
+        "label": "How sure the sectarian talk check must be to pass a message on",
+        "describe": "{}%",
+    },
 }
 
 
