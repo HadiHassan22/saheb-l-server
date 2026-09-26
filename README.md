@@ -145,7 +145,7 @@ messages that tag it or reply to it, so members can also talk to each
 other there. It is the only channel where the bot reads what ordinary
 messages say. If such a message has an image attached, the bot can see it too
 (up to 3 images, 5 MB each) and use what's in it, for example drafting an
-emoji or the server's icon straight from the attachment. The model
+emoji, a sticker or the server's icon straight from the attachment. The model
 understands the request, and code decides what is allowed: every tool is
 in one of four tiers, fixed in `assistant.py`.
 
@@ -165,6 +165,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Pickers in `#roles` | create, change, remove a dropdown where members give themselves roles (pick one, or any); new roles are made with it |
 | Onboarding | the questions new members answer when they join (each answer shows channels and/or gives joinable roles), and the channels they see from the start |
 | Emojis | add (from an image attached in `#ask-saheb`), remove |
+| Stickers | add (from an image attached in `#ask-saheb`), remove |
 | The server | rename it; set its icon |
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
 | AutoMod | add or remove watch words; blocked words stay |
@@ -485,7 +486,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 35 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 36 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |

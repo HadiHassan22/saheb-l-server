@@ -120,6 +120,71 @@ class WatchWords(WithTempData):
                       .keyword_filter)
 
 
+class Stickers(WithTempData):
+    """Stickers by vote, mirroring emojis: a name and an attached image in,
+    a name out."""
+
+    def sticker(self, id, name):
+        s = mock.Mock(spec=discord.GuildSticker)
+        s.id, s.name = id, name
+        s.delete = mock.AsyncMock()
+        return s
+
+    def guild(self, stickers=()):
+        g = mock.create_autospec(discord.Guild, instance=True)
+        g.stickers, g.sticker_limit = list(stickers), 5
+        return g
+
+    async def test_adding_a_sticker_uploads_the_attached_image(self):
+        g = self.guild()
+        action = {"kind": actions.STICKER_ADD, "name": "catdance",
+                  "image": actions.save_image(b"pixels")}
+        self.assertIsNone(await actions.check(g, action))
+        said = await actions.carry_out(g, action)
+        g.create_sticker.assert_awaited_once()
+        kwargs = g.create_sticker.call_args.kwargs
+        self.assertEqual((kwargs["name"], kwargs["emoji"], kwargs["reason"]),
+                         ("catdance", "catdance", actions.REASON))
+        sent = kwargs["file"]
+        self.assertIsInstance(sent, discord.File)
+        sent.reset()
+        self.assertEqual(sent.fp.read(), b"pixels")
+        self.assertIn("catdance is added", said)
+
+    async def test_removing_a_sticker_deletes_the_one_by_that_name(self):
+        s = self.sticker(40, "catdance")
+        g = self.guild([s])
+        action = {"kind": actions.STICKER_REMOVE, "name": "catdance"}
+        self.assertIsNone(await actions.check(g, action))
+        self.assertEqual(action["sticker_id"], 40)
+        said = await actions.carry_out(g, action)
+        s.delete.assert_awaited_once_with(reason=actions.REASON)
+        self.assertIn("catdance is removed", said)
+
+    async def test_a_sticker_needs_a_short_name_an_image_and_a_free_slot(self):
+        g = self.guild([self.sticker(40, "catdance")])
+        self.assertIn("2 to 30 characters", await actions.check(
+            g, {"kind": actions.STICKER_ADD, "name": "x", "image": "i"}))
+        self.assertIn("already a sticker", await actions.check(
+            g, {"kind": actions.STICKER_ADD, "name": "catdance", "image": "i"}))
+        self.assertIn("Attach the image", await actions.check(
+            self.guild(), {"kind": actions.STICKER_ADD, "name": "nyan"}))
+        full = self.guild([self.sticker(i, f"s{i}") for i in range(5)])
+        self.assertIn("no sticker slots", await actions.check(
+            full, {"kind": actions.STICKER_ADD, "name": "nyan", "image": "i"}))
+        self.assertIn("no sticker by that name", await actions.check(
+            g, {"kind": actions.STICKER_REMOVE, "name": "nyan"}))
+
+    def test_the_proposal_says_what_will_happen(self):
+        title, details = actions.describe({"kind": actions.STICKER_ADD, "name": "catdance"})
+        self.assertEqual(title, "Add the sticker catdance")
+        self.assertIn("attached image as the sticker **catdance**", details)
+        title, details = actions.describe({"kind": actions.STICKER_REMOVE, "name": "catdance"})
+        self.assertEqual(title, "Remove the sticker catdance")
+        self.assertLessEqual(len("Proposal 99: " + title), 256)  # a card's title
+        self.assertLessEqual(len(details), 4000)                 # one embed
+
+
 class People(WithTempData):
     def people_guild(self, target_position=1):
         g = guild()

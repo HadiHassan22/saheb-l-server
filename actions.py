@@ -20,6 +20,7 @@ Limits that hold whatever a vote says:
   count until it closes, and the member can't vote on it.
 """
 
+import io
 import logging
 import re
 import uuid
@@ -45,6 +46,7 @@ CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE = (
     "create_category", "rename_category", "delete_category")
 ROLE_CREATE, ROLE_EDIT, ROLE_DELETE = "create_role", "edit_role", "delete_role"
 EMOJI_ADD, EMOJI_REMOVE = "add_emoji", "remove_emoji"
+STICKER_ADD, STICKER_REMOVE = "add_sticker", "remove_sticker"
 SERVER_NAME, SERVER_ICON = "rename_server", "set_server_icon"
 RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
@@ -58,13 +60,14 @@ CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE, ACCESS,
                  CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE)
 ROLE_KINDS = (ROLE_CREATE, ROLE_EDIT, ROLE_DELETE)
 EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
+STICKER_KINDS = (STICKER_ADD, STICKER_REMOVE)
 SERVER_KINDS = (SERVER_NAME, SERVER_ICON)
 RULE_KINDS = (RULE_EDIT, RULE_ADD, RULE_REMOVE)
 WATCH_KINDS = (WATCH_ADD, WATCH_REMOVE)
 PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
-KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + SERVER_KINDS + RULE_KINDS
+KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SERVER_KINDS + RULE_KINDS
          + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
@@ -74,7 +77,7 @@ CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
 MAX_CHANNELS, MAX_ROLES, MAX_RULES = 450, 100, 20
-MAX_EMOJI_BYTES, MAX_ICON_BYTES = 256 * 1024, 4 * 1024 * 1024
+MAX_EMOJI_BYTES, MAX_STICKER_BYTES, MAX_ICON_BYTES = 256 * 1024, 512 * 1024, 4 * 1024 * 1024
 REASON = "Ordered by a community vote"
 
 
@@ -151,6 +154,8 @@ async def check(guild, action):
         return _check_role(guild, action)
     if kind in EMOJI_KINDS:
         return _check_emoji(guild, action)
+    if kind in STICKER_KINDS:
+        return _check_sticker(guild, action)
     if kind in SERVER_KINDS:
         return _check_server(guild, action)
     if kind in RULE_KINDS:
@@ -496,6 +501,26 @@ def _check_emoji(guild, action):
     return None
 
 
+def _check_sticker(guild, action):
+    name = str(action.get("name") or "").strip().strip(":")
+    if action["kind"] == STICKER_ADD:
+        if not 2 <= len(name) <= 30:
+            return "A sticker name is 2 to 30 characters."
+        if discord.utils.get(guild.stickers, name=name):
+            return f"There's already a sticker called {name}."
+        if not action.get("image"):
+            return "Attach the image to your message."
+        if len(guild.stickers) >= guild.sticker_limit:
+            return "The server has no sticker slots left."
+        action["name"] = name
+        return None
+    sticker = discord.utils.get(guild.stickers, name=name)
+    if sticker is None:
+        return "There's no sticker by that name."
+    action["name"], action["sticker_id"] = sticker.name, sticker.id
+    return None
+
+
 def _check_server(guild, action):
     if action["kind"] == SERVER_NAME:
         name = str(action.get("name") or "").strip()
@@ -639,6 +664,10 @@ def describe(action):
                             f"Add the attached image as the emoji **:{a['name']}:**."),
         EMOJI_REMOVE: lambda: (f"Remove the emoji :{a['name']}:",
                                f"Remove the emoji **:{a['name']}:**."),
+        STICKER_ADD: lambda: (f"Add the sticker {a['name']}",
+                              f"Add the attached image as the sticker **{a['name']}**."),
+        STICKER_REMOVE: lambda: (f"Remove the sticker {a['name']}",
+                                 f"Remove the sticker **{a['name']}**."),
         SERVER_NAME: lambda: ("Rename the server", f"Rename the server to **{a['name']}**."),
         SERVER_ICON: lambda: ("New server icon", "Set the attached image as the server icon."),
         RULE_EDIT: lambda: (f"Reword rule {a['number']}", f"Change rule {a['number']} to: "
@@ -774,6 +803,15 @@ async def _carry_out(guild, action):
     if kind == EMOJI_REMOVE:
         await guild.get_emoji(a["emoji_id"]).delete(reason=REASON)
         return f"Done: :{a['name']}: is removed."
+    if kind == STICKER_ADD:
+        await guild.create_sticker(
+            name=a["name"], emoji=a["name"],
+            file=discord.File(io.BytesIO(load_image(a["image"])), filename="sticker.png"),
+            reason=REASON)
+        return f"Done: the sticker {a['name']} is added."
+    if kind == STICKER_REMOVE:
+        await discord.utils.get(guild.stickers, id=a["sticker_id"]).delete(reason=REASON)
+        return f"Done: the sticker {a['name']} is removed."
     if kind == SERVER_NAME:
         await guild.edit(name=a["name"], reason=REASON)
         return f"Done: the server is now called {a['name']}."

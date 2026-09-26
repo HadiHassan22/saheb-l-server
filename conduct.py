@@ -78,7 +78,7 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 **Talk to the bot.** Ask Saheb l Server anything in {ask_mention}, in English, Arabic or Arabizi. Tag it or reply to one of its messages; it doesn't answer anything else.
 - For you, right away: your name color, joining a role, your nickname, an invite link.
 - For everyone, right away: scheduling an event, a temporary voice channel, a thread, a pin. These are posted in #server-log with who asked.
-- Anything else that affects everyone (channels, roles, pickers in #roles, the questions new members are asked, emojis, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
+- Anything else that affects everyone (channels, roles, pickers in #roles, the questions new members are asked, emojis and stickers, the rules, removing a member) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
 
 **Appeals.** Think the bot got it wrong? Use `/appeal` with the case number, or the Appeal button in its message to you. The community votes, and can overturn any action.
 
@@ -105,7 +105,7 @@ def tutorial_text(ask_mention, proposals_mention):
 
 **Small shared things I do in public, with your name on them.** Schedule an event (times are Beirut time), cancel an event you made, open a temporary voice channel, start a thread, pin or unpin a message. These happen right away and are posted in #server-log with who asked.
 
-**Anything that changes the server for everyone goes to a vote.** Tell me what you want and I'll draft it for you. You file it with the button under my reply, or write one yourself with /propose, and members vote on the card in {proposals_mention} with Yes and No. That covers channels and categories, roles, the pickers in #roles, the questions new members are asked, emojis, the server's name or icon, the rules, AutoMod watch words, cancelling someone else's event, settings, and kicking, banning or unbanning a member. Anything else is a general proposal: if it passes and it needs new code, I write it into my own code, it's checked, and it goes live.
+**Anything that changes the server for everyone goes to a vote.** Tell me what you want and I'll draft it for you. You file it with the button under my reply, or write one yourself with /propose, and members vote on the card in {proposals_mention} with Yes and No. That covers channels and categories, roles, the pickers in #roles, the questions new members are asked, emojis and stickers, the server's name or icon, the rules, AutoMod watch words, cancelling someone else's event, settings, and kicking, banning or unbanning a member. Anything else is a general proposal: if it passes and it needs new code, I write it into my own code, it's checked, and it goes live.
 
 **No human moderators here.** The members govern this server by voting, and I carry out what you decide. Think a moderation call was wrong? Use /appeal with the case number, or the Appeal button in my message to you, and the community votes on it.
 
