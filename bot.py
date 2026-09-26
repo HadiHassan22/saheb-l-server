@@ -24,6 +24,7 @@ import appeals  # noqa: E402
 import chat  # noqa: E402
 import code_changes  # noqa: E402, F401  (each kind of proposal registers itself: kinds.py)
 import colors  # noqa: E402
+import greetings  # noqa: E402
 import guard  # noqa: E402
 import health  # noqa: E402
 import layout  # noqa: E402
@@ -161,6 +162,7 @@ class Bot(discord.Client):
 
     async def on_message(self, message):
         await chat.on_message(message, self)
+        await greetings.on_message(message)
 
 
 if __name__ == "__main__":

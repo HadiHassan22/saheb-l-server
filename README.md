@@ -138,6 +138,11 @@ emoji or the server's icon straight from the attachment. The model
 understands the request, and code decides what is allowed: every tool is
 in one of four tiers, fixed in `assistant.py`.
 
+The bot speaks once outside `#ask-saheb`: the daily greeting. On a
+member's first message each day in the channel the members moved it to,
+it says "ija el batal" (it used to say it in `#general`). It never reads
+those messages: it only notices who spoke and when.
+
 | Tier | Rule | What |
 | --- | --- | --- |
 | Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases, onboarding |
@@ -470,6 +475,7 @@ one changed, and is told why it wasn't kept.
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
 | `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
+| `greetings.py` | The daily "ija el batal" greeting: once a day on each member's first message, in the channel the members chose |
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
