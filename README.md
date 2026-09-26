@@ -117,7 +117,10 @@ roles and puts the color picker in `#roles`.
 The layout is in `layout.py`. Once the server is running, channels change
 by vote (see below): a channel deleted by vote stays deleted.
 On every start it recreates anything missing and brings its AutoMod rules
-and the `#welcome` and `#rules` posts up to date. Once the server is a
+and the `#welcome` and `#rules` posts up to date. Nothing is made twice:
+each category, channel and name color is looked for before it is made, so
+running the setup again over a server that already has the layout fills
+in only what is missing. Once the server is a
 Community server with a rules channel of Discord's own (Server Settings,
 Safety Setup), the bot uses that channel as `#rules` and deletes the one
 it built, if only the bot ever posted there. It runs one server: the

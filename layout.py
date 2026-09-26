@@ -5,7 +5,10 @@ first start it builds the layout below, adopting Discord's default
 #general and General voice channel and removing the empty default
 categories. On every start after that it recreates anything missing and
 brings the AutoMod rules and the #welcome and #rules posts up to date.
-Channels are remembered by id, so renaming one changes nothing.
+Everything is looked for before it is made: a category, channel or name
+color the server already has is used as it is, so running the setup
+again over a server that has the layout doubles nothing. Channels are
+remembered by id, so renaming one changes nothing.
 
 Once the server is a Community server, Discord has a rules channel of its
 own (Server Settings, Safety Setup) and points new members at it. The bot
@@ -168,7 +171,8 @@ async def _adopt_rules_channel(guild, saved, category):
 
 
 def _adoptable(guild, name, kind):
-    """Discord's default channel of this name, on the first build only."""
+    """A channel of this name and type the server already has, whatever
+    put it there: used instead of making a second one."""
     kind_class = discord.VoiceChannel if kind in (VOICE, AFK) else discord.TextChannel
     for existing in guild.channels:
         if isinstance(existing, kind_class) and existing.name == name:
@@ -190,6 +194,8 @@ async def build(guild):
     for category_name, channels in PLAN:
         category = guild.get_channel(saved["channels"].get(f"category:{category_name}") or 0)
         if category is None:
+            category = discord.utils.get(guild.categories, name=category_name)
+        if category is None:
             category = await guild.create_category(category_name)
         saved["channels"][f"category:{category_name}"] = category.id
         if any(spec["name"] == "rules" for spec in channels):
@@ -199,7 +205,7 @@ async def build(guild):
             if name in saved["removed"]:
                 continue
             existing = guild.get_channel(saved["channels"].get(name) or 0)
-            if existing is None and first:
+            if existing is None:
                 existing = _adoptable(guild, name, kind)
                 if existing is not None:
                     await existing.edit(category=category,
