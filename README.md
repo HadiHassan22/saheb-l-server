@@ -179,9 +179,9 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   with `/admin add` or by asking the bot, see `admins.py`; the owner
   counts as one), what they ask for is done at once, without questions:
   posted in `#proposals` as already passed and carried out like a passed
-  vote, and the bot says what came of it. Admins also get two tools
-  members don't: making or removing admins, and overturning a moderation
-  case.
+  vote, and the bot says what came of it. Admins also get three tools
+  members don't: making or removing admins, overturning a moderation
+  case, and giving an existing role to every member at once.
   Deleting a channel or category, or clearing a channel's history, is the
   exception: it comes back as a draft with a **Ship it** button to
   confirm, since the history is lost for good. A code change still goes
@@ -485,9 +485,9 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 34 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 35 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
-| `quick.py` | What's done at once when asked: personal and light actions, with their limits |
+| `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |
 | `colors.py` | The name colors, the `#roles` picker and `/color` |
 | `health.py` | `/healthz` and `/api/passed`, which the update system relies on (protected) |

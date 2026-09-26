@@ -191,6 +191,59 @@ class Quick(WithTempData):
             await quick.pin(member, "pin the last message")
 
 
+class GiveToEveryone(WithTempData):
+    """quick.give_role_to_all: an admin gives an existing role to every
+    member of the server in one go."""
+
+    def member(self, id, name, *has):
+        one = mock.Mock(spec=discord.Member)
+        one.id, one.display_name, one.roles = id, name, list(has)
+        one.add_roles = mock.AsyncMock()
+        return one
+
+    def server(self, *members, roles=()):
+        guild = mock.Mock(spec=discord.Guild)
+        guild.roles, guild.members = list(roles), list(members)
+        asking = self.member(9, "Nestled")
+        asking.guild = guild
+        store.save("roles", {"40": {"joinable": True}})
+        return asking
+
+    async def test_only_a_role_made_by_vote_goes_round_the_whole_server(self):
+        gamers, cedar = role(40, "Gamers"), role(41, "Cedar")
+        maya = self.member(1, "Maya")
+        asking = self.server(maya, roles=[gamers, cedar])
+        for name in ("Cedar", "Saheb l Server", "Nope"):
+            with self.assertRaisesRegex(quick.Refused, "made by vote"):
+                await quick.give_role_to_all(asking, name)
+        maya.add_roles.assert_not_awaited()
+
+    async def test_it_gives_the_role_to_every_member_and_leaves_out_who_it_cant(self):
+        gamers = role(40, "Gamers")
+        maya, tony, rami = (self.member(2, "Maya", gamers), self.member(3, "Tony"),
+                            self.member(4, "Rami"))
+        tony.add_roles = mock.AsyncMock(
+            side_effect=discord.HTTPException(mock.Mock(status=403), "no"))
+        asking = self.server(maya, tony, rami, roles=[gamers])
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            said = await quick.give_role_to_all(asking, "@gamers")
+        maya.add_roles.assert_not_awaited()  # it has the role already
+        rami.add_roles.assert_awaited_once_with(gamers, reason="Asked for by Nestled")
+        self.assertIn("Gamers is now on 1 member", said)
+        self.assertIn("1 member I can't act on", said)
+        self.assertIn("<@9> gave every member the role Gamers", logged.call_args.args[1])
+
+    async def test_when_everyone_has_the_role_it_says_so_and_still_logs_it(self):
+        gamers = role(40, "Gamers")
+        maya = self.member(2, "Maya", gamers)
+        asking = self.server(maya, roles=[gamers])
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            said = await quick.give_role_to_all(asking, "Gamers")
+        self.assertEqual(said, "Everyone already has Gamers.")
+        maya.add_roles.assert_not_awaited()
+        logged.assert_awaited_once()
+
+
 class Guard(WithTempData):
     def test_powers_are_taken_and_everything_else_kept(self):
         kept = discord.Permissions(send_messages=True, connect=True, change_nickname=True)

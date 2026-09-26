@@ -21,6 +21,7 @@ import admins
 import assistant
 import guard
 import layout
+import quick
 import store
 
 OWNER, ADMIN, STRANGER, BOT = 1, 7, 9, 2
@@ -160,6 +161,19 @@ class Tools(WithTempData):
             said = json.loads(await assistant.run_tool(ctx, "set_admin",
                                                        {"member": "<@8>", "admin": True}))
         self.assertEqual(said, {"result": "m8 is now an admin."})
+
+    async def test_giving_a_role_to_everyone_is_admins_only(self):
+        ctx = assistant.Context(guild=self.guild(), member=mock.Mock(spec=discord.Member))
+        said = json.loads(await assistant.run_tool(ctx, "give_role_to_all",
+                                                   {"role": "Gamers"}))
+        self.assertEqual(said, {"error": "No such tool."})
+        ctx.admin = True
+        with mock.patch.object(quick, "give_role_to_all",
+                               mock.AsyncMock(return_value="Done: Gamers is now on 3 members.")) as give:
+            said = json.loads(await assistant.run_tool(ctx, "give_role_to_all",
+                                                       {"role": "Gamers"}))
+        give.assert_awaited_once_with(ctx.member, "Gamers")
+        self.assertEqual(said, {"result": "Done: Gamers is now on 3 members."})
 
 
 if __name__ == "__main__":

@@ -135,6 +135,10 @@ class System(unittest.TestCase):
     def test_the_bot_is_told_never_to_use_an_em_dash(self):
         self.assertIn("Never use an em dash", assistant.SYSTEM)
 
+    def test_the_bot_is_told_admins_can_give_everyone_a_role(self):
+        for name in ("set_admin", "overturn_case", "give_role_to_all"):
+            self.assertIn(name, assistant.SYSTEM)
+
     def test_only_irreversible_channel_changes_need_confirming(self):
         for kind in (actions.DELETE, actions.CATEGORY_DELETE, actions.PURGE):
             self.assertTrue(assistant.needs_confirming(
