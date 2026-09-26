@@ -53,7 +53,8 @@ def guild():
     gaming = fake(discord.VoiceChannel, 4, "Gaming 1", mention="<#4>")
     hangout.channels, voice.channels = [general, cars, welcome], [gaming]
     everything = [hangout, voice, general, cars, welcome, gaming]
-    g = types.SimpleNamespace(id=99, channels=everything, categories=[hangout, voice])
+    g = types.SimpleNamespace(id=99, channels=everything, categories=[hangout, voice],
+                              stickers=[], sticker_limit=5)
     g.get_channel = lambda cid: next((c for c in everything if c.id == cid), None)
     return g
 
@@ -272,6 +273,27 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
                          [proposals.ACTION, proposals.SETTING, proposals.GENERAL])
         self.assertEqual(filed[0]["action"]["slowmode"], 30)
         self.assertEqual(filed[1]["value"], 8)
+
+    async def test_a_sticker_draft_keeps_the_attached_image(self):
+        picture = attachment("image/png", b"pixels")
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_sticker_change", {"change": "add_sticker", "name": "catdance",
+                                                   "attachment": 1})]),
+            reply("Drafted it."), attachments=[picture])
+        draft = ctx.drafts[0]
+        self.assertEqual(draft["title"], "Add the sticker catdance")
+        self.assertEqual(draft["payload"]["kind"], actions.STICKER_ADD)
+        self.assertEqual(actions.load_image(draft["payload"]["image"]), b"pixels")
+        self.assertIn("button", tool_result(calls)["note"])
+
+    async def test_a_sticker_image_over_the_limit_is_refused(self):
+        big = attachment("image/png", b"x", size=actions.MAX_STICKER_BYTES + 1)
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_sticker_change", {"change": "add_sticker", "name": "catdance",
+                                                   "attachment": 1})]),
+            reply("Too big."), attachments=[big])
+        self.assertEqual(ctx.drafts, [])
+        self.assertIn("512 KB", tool_result(calls)["error"])
 
 
     async def test_an_admins_request_is_done_at_once_except_deleting(self):
