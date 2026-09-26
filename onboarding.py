@@ -37,9 +37,9 @@ MIN_CHANNELS, MIN_OPEN = 7, 5  # Discord's minimum: 7 default channels, 5 member
 REASON = "Keeping onboarding in step with the server"
 
 # Planned channel names (layout.PLAN), turned into ids the first time.
-DEFAULT_CHANNELS = ["welcome", "rules", "roles", "ask-saheb", "proposals", "mod-log",
-                    "server-log", "general", "introductions", "memes", "media",
-                    "off-topic", "General", "Ahwe", "Lounge"]
+DEFAULT_CHANNELS = ["welcome", "guide", "rules", "roles", "ask-saheb", "proposals",
+                    "mod-log", "server-log", "general", "introductions", "memes",
+                    "media", "off-topic", "General", "Ahwe", "Lounge"]
 DEFAULT_QUESTIONS = [
     ("What are you into?", False, [
         ("Food", "🍽️", "Recipes, and the best man2oushe in town", ["food"]),
@@ -69,7 +69,9 @@ def _ids(guild, names):
 
 def saved(guild):
     """{"channels": [ids], "questions": [...], "sent": ...}, starting from
-    the defaults the first time."""
+    the defaults the first time. A server whose page was written before
+    there was a #guide gets the guide linked too, once; after that only a
+    vote changes the list."""
     data = store.load("onboarding", None)
     if data is None:
         data = {"channels": _ids(guild, DEFAULT_CHANNELS), "sent": None, "questions": [
@@ -79,6 +81,13 @@ def saved(guild):
                 for option, emoji, description, channels in options]}
             for title, one, options in DEFAULT_QUESTIONS]}
         store.save("onboarding", data)
+    if not data.get("guide_added"):
+        guide = layout.channel(guild, "guide")
+        if guide is not None:
+            data["guide_added"] = True
+            if guide.id not in data["channels"]:
+                data["channels"].append(guide.id)
+            store.save("onboarding", data)
     return data
 
 

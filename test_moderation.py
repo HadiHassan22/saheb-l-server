@@ -258,6 +258,17 @@ class Texts(unittest.TestCase):
         self.assertIn("24 hours", welcome)
         self.assertIn("<#1>", welcome)
 
+    def test_the_guide_says_how_to_use_the_bot(self):
+        title, guide = conduct.tutorial_text("<#1>", "<#2>")
+        self.assertLessEqual(len(title), 256)   # an embed title
+        self.assertLessEqual(len(guide), 4096)  # one embed
+        self.assertIn("<#1>", guide)            # where to talk to the bot
+        self.assertIn("<#2>", guide)            # where the votes are
+        for said in ("Beirut", "invite link", "/propose", "/appeal", "cosmetic",
+                     "without a vote", "temporary voice channel"):
+            self.assertIn(said, guide)
+        self.assertNotIn("—", guide)            # the bot never uses an em dash
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -101,7 +101,7 @@ this, adopting Discord's default `#general` and General voice channel:
 
 | Category | Channels |
 | --- | --- |
-| Start here | `#welcome`, `#rules`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
+| Start here | `#welcome`, `#guide`, `#rules`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
 | Governance | `#ask-saheb` (talk to the bot), `#proposals` (the bot posts; members discuss in each proposal's thread) |
 | Hangout | `#general`, `#introductions`, `#memes`, `#media`, `#off-topic` |
 | Lebanon | `#lebanon-news`, `#politics-and-religion` (30-second slowmode), `#diaspora` |
@@ -117,7 +117,7 @@ roles and puts the color picker in `#roles`.
 The layout is in `layout.py`. Once the server is running, channels change
 by vote (see below): a channel deleted by vote stays deleted.
 On every start it recreates anything missing and brings its AutoMod rules
-and the `#welcome` and `#rules` posts up to date. Nothing is made twice:
+and the `#welcome`, `#guide` and `#rules` posts up to date. Nothing is made twice:
 each category, channel and name color is looked for before it is made, so
 running the setup again over a server that already has the layout fills
 in only what is missing. Once the server is a
@@ -134,6 +134,10 @@ day, in that channel alone. It only notices who posted and when, never
 what the message says.
 
 ## Talking to the bot
+
+All of this is written up for members in the tutorial the bot posts in
+`#guide`, warm and simple, with a little Lebanese Arabic where it fits.
+New members see that channel from the moment they join.
 
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
 answers in the language they use, never using an em dash. It answers only
@@ -492,7 +496,7 @@ one changed, and is told why it wasn't kept.
 | `PROTECTED.md` | What votes can't change (protected) |
 | `.github/` | The self-update workflow, its protected-core check and security review (protected) |
 | `layout.py` | Builds and repairs the server; knows where each channel is |
-| `conduct.py` | The rules of conduct and the `#welcome` text |
+| `conduct.py` | The rules of conduct, the `#welcome` text, and the `#guide` tutorial |
 | `settings.py` | The votable settings and their fixed ranges |
 | `proposals.py`, `voting_ui.py` | Proposals and ballots, the same for every kind; their commands and vote buttons |
 | `kinds.py` | What differs between kinds of proposal, each in its own module |

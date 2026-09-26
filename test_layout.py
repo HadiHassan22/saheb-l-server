@@ -20,7 +20,7 @@ import layout
 import store
 
 ROOMS = [spec for _, channels in layout.PLAN for spec in channels]
-NEEDED = ("welcome", "rules", "roles", "mod-log", "proposals", "general",
+NEEDED = ("welcome", "guide", "rules", "roles", "mod-log", "proposals", "general",
           "automod-alerts", "admin-log", "AFK")
 
 
@@ -46,7 +46,7 @@ class Plan(unittest.TestCase):
 
     def test_only_the_bot_posts_in_the_record_channels(self):
         by_name = {spec["name"]: spec for spec in ROOMS}
-        for name in ("welcome", "rules", "roles", "mod-log"):
+        for name in ("welcome", "guide", "rules", "roles", "mod-log"):
             self.assertEqual(by_name[name]["kind"], layout.READ_ONLY)
         self.assertEqual(by_name["automod-alerts"]["kind"], layout.HIDDEN)
         self.assertEqual(by_name["admin-log"]["kind"], layout.HIDDEN)

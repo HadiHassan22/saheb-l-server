@@ -4,7 +4,7 @@ The bot is made for a brand-new server and needs Administrator. On its
 first start it builds the layout below, adopting Discord's default
 #general and General voice channel and removing the empty default
 categories. On every start after that it recreates anything missing and
-brings the AutoMod rules and the #welcome and #rules posts up to date.
+brings the AutoMod rules and the #welcome, #guide and #rules posts up to date.
 Everything is looked for before it is made: a category, channel or name
 color the server already has is used as it is, so running the setup
 again over a server that has the layout doubles nothing. Channels are
@@ -43,6 +43,7 @@ def room(name, kind=OPEN, topic="", slowmode=0):
 PLAN = [
     ("Start here", [
         room("welcome", READ_ONLY, "How this server works."),
+        room("guide", READ_ONLY, "How to use Saheb l Server: just talk to it."),
         room("rules", READ_ONLY, "The rules the moderator enforces. Change them by vote."),
         room("roles", READ_ONLY,
              "Pick a name color here or with /color. Colors are only for looks: "
@@ -252,16 +253,20 @@ async def server_log(guild, text):
 
 
 async def post_texts(guild):
-    """Post #welcome and #rules, or edit them if the text has changed (for
-    example after a vote changes a setting)."""
+    """Post #welcome, #guide and #rules, or edit them if the text has
+    changed (for example after a vote changes a setting)."""
     owner = guild.owner.mention if guild.owner else "the server owner"
     mod_log = channel(guild, "mod-log")
     saved = _saved()
     ask = channel(guild, "ask-saheb")
+    proposals = channel(guild, "proposals")
     welcome = conduct.welcome_text(owner, mod_log.mention if mod_log else "#mod-log",
                                    ask.mention if ask else "#ask-saheb")
+    guide = conduct.tutorial_text(ask.mention if ask else "#ask-saheb",
+                                  proposals.mention if proposals else "#proposals")
     # Embeds rather than plain messages: a description holds 4096 characters.
-    for name, (title, text) in (("welcome", welcome), ("rules", conduct.rules_text())):
+    for name, (title, text) in (("welcome", welcome), ("guide", guide),
+                                ("rules", conduct.rules_text())):
         target = channel(guild, name)
         if target is None:
             continue

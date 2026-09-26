@@ -124,6 +124,21 @@ class Defaults(WithGuild):
         self.assertIn("Community", await onboarding.sync(self.guild))
         self.guild.edit_onboarding.assert_not_awaited()
 
+    async def test_the_guide_is_linked_even_for_a_server_from_before_it(self):
+        # Onboarding written before there was a #guide channel.
+        store.save("onboarding", {"sent": None, "questions": [],
+                                  "channels": [self.channels[n].id
+                                               for n in onboarding.DEFAULT_CHANNELS
+                                               if n != "guide"]})
+        await onboarding.sync(self.guild)
+        ids = {c.id for c in self.sent()["default_channels"]}
+        self.assertIn(self.channels["guide"].id, ids)
+        # A vote can still take it out, and it stays out.
+        await self.carry_out(kind=actions.ONBOARDING_CHANNELS, remove=["guide"])
+        await onboarding.sync(self.guild)
+        ids = {c.id for c in self.sent()["default_channels"]}
+        self.assertNotIn(self.channels["guide"].id, ids)
+
 
 class InStep(WithGuild):
     async def test_every_picker_is_a_question_with_the_same_roles(self):

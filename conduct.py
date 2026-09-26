@@ -1,5 +1,9 @@
-"""The server's rules of conduct and the welcome text, as posted in
-#rules and #welcome. The moderator judges messages against `rules()`.
+"""The server's rules of conduct and the texts posted in #rules, #welcome
+and #guide. The moderator judges messages against `rules()`.
+
+The guide in #guide is the friendly tutorial for members: what to ask the
+bot, what it does at once, and what takes a vote. It is written in the
+bot's own warm voice, with a little Lebanese Arabic where it fits.
 
 The rules start as DEFAULT_RULES and change by vote (actions.py). Two
 limits hold whatever a vote says: rules 4 to 6 (doxxing, sexual content,
@@ -88,3 +92,23 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 **What votes can't change.** Roles here are only cosmetic (a role can open a channel to whoever holds it, but gives no power over anyone), and nobody but the admins holds power over anyone. Nor can votes change who the admins are, the bot's access keys, the system that updates and rolls back its code, the range each setting can take, the safety floor (blocking scams, phone numbers and sexual content involving minors, and the self-harm support line), and anything Discord's Terms of Service require.
 
 **Fair warning.** The bot will make mistakes, a vote might break something, and it might go offline. If so, we roll back to a working version and keep going."""
+
+
+def tutorial_text(ask_mention, proposals_mention):
+    """(title, text) for #guide: how members use the bot, in its own
+    words, pointing at the places they need."""
+    return "How to use Saheb l Server", f"""Ahla! This is the guide to using me, Saheb l Server. There are no commands to memorize: just talk to me. Write in English, Arabic or Arabizi, whatever is easier.
+
+**Just talk to me in {ask_mention}.** Tag me or reply to one of my messages, and ask me anything. Say hi and have a little chat, or ask about the server: the channels, the roles, what events are coming up, the rules, open proposals, a moderation case, how this place works for new members. You get a plain answer.
+
+**Things I do for you right away, just ask.** Your name color, joining or leaving a role, your nickname, or an invite link to bring a friend in. It's done the moment you ask, and you can undo it yourself.
+
+**Small shared things I do in public, with your name on them.** Schedule an event (times are Beirut time), cancel an event you made, open a temporary voice channel, start a thread, pin or unpin a message. These happen right away and are posted in #server-log with who asked.
+
+**Anything that changes the server for everyone goes to a vote.** Tell me what you want and I'll draft it for you. You file it with the button under my reply, or write one yourself with /propose, and members vote on the card in {proposals_mention} with Yes and No. That covers channels and categories, roles, the pickers in #roles, the questions new members are asked, emojis, the server's name or icon, the rules, AutoMod watch words, cancelling someone else's event, settings, and kicking, banning or unbanning a member. Anything else is a general proposal: if it passes and it needs new code, I write it into my own code, it's checked, and it goes live.
+
+**No human moderators here.** The members govern this server by voting, and I carry out what you decide. Think a moderation call was wrong? Use /appeal with the case number, or the Appeal button in my message to you, and the community votes on it.
+
+**The limits, so nobody is surprised.** Roles here are only cosmetic: a color for your name, or a channel you can see, never power over anyone. Only the admins have powers, and they answer to the owner (see #welcome). And whatever you ask me for yourself: I never change the server for everyone or act on another member without a vote. That's what keeps everyone equal here.
+
+New here? #welcome explains how the server works, and #rules is what the moderator enforces. Yalla, come say hi in {ask_mention}."""
