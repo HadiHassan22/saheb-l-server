@@ -1,4 +1,5 @@
-"""Checks for the server plan and the name colors. No Discord server needed.
+"""Checks for the server plan, the setup that builds it, and the name
+colors. No Discord server needed.
 
     python -m unittest
 """
@@ -11,6 +12,8 @@ import unittest
 import unittest.mock
 import zlib
 from pathlib import Path
+
+import discord
 
 import colors
 import layout
@@ -187,3 +190,105 @@ class RulesChannel(unittest.IsolatedAsyncioTestCase):
             await layout._adopt_rules_channel(self.guild(rules, old, [1]), saved, "cat")
             self.assertEqual(saved, {"channels": {"rules": 40}, "messages": {"rules": 99}})
         old.edit.assert_not_awaited()
+
+
+class Build(unittest.IsolatedAsyncioTestCase):
+    """The setup runs again on every start and after every deployment. It
+    must use what the server already has and make only what is missing,
+    so a second run makes nothing twice."""
+
+    def setUp(self):
+        self._saved_dir = store.DATA_DIR
+        self._tmp = tempfile.mkdtemp()
+        store.DATA_DIR = Path(self._tmp)
+        self._ids = 0
+
+    def tearDown(self):
+        store.DATA_DIR = self._saved_dir
+        shutil.rmtree(self._tmp)
+
+    def next_id(self):
+        self._ids += 1
+        return self._ids
+
+    def message(self):
+        made = unittest.mock.create_autospec(discord.Message, instance=True)
+        made.id, made.embeds = self.next_id(), []
+        return made
+
+    def named(self, cls, name):
+        made = unittest.mock.create_autospec(cls, instance=True)
+        made.id, made.name = self.next_id(), name
+        return made
+
+    def room(self, name, kind):
+        cls = (discord.VoiceChannel if kind in (layout.VOICE, layout.AFK)
+               else discord.TextChannel)
+        made = self.named(cls, name)
+        made.mention = f"#{name}"
+        made.send.return_value = self.message()
+        made.fetch_message.return_value = self.message()
+        return made
+
+    def role(self, name, colour):
+        made = self.named(discord.Role, name)
+        made.colour = discord.Colour(colour)
+        return made
+
+    def guild(self, missing=()):
+        """A server that already has the whole layout and the color
+        roles, minus the names in `missing`."""
+        made = unittest.mock.create_autospec(discord.Guild, instance=True)
+        made.id = self.next_id()
+        made.me = unittest.mock.create_autospec(discord.Member, instance=True)
+        made.me.guild_permissions.administrator = True
+        made.owner = None
+        made.rules_channel = None
+        made.default_role = discord.Object(id=0)
+        made.fetch_automod_rules.return_value = []
+        categories, rooms = [], []
+        for category_name, specs in layout.PLAN:
+            if category_name not in missing:
+                category = self.named(discord.CategoryChannel, category_name)
+                category.channels = []
+                categories.append(category)
+            for spec in specs:
+                if spec["name"] not in missing:
+                    rooms.append(self.room(spec["name"], spec["kind"]))
+        roles = [self.role(name, value) for name, value, _ in colors.COLORS
+                 if name not in missing]
+        self.by_name = {thing.name: thing for thing in categories + rooms + roles}
+        by_id = {thing.id: thing for thing in categories + rooms + roles}
+        made.categories = categories
+        made.channels = categories + rooms
+        made.roles = roles
+        made.get_channel.side_effect = lambda channel_id: by_id.get(channel_id)
+        made.get_role.side_effect = lambda role_id: by_id.get(role_id)
+        made.create_category.return_value = self.named(discord.CategoryChannel, "made")
+        made.create_text_channel.return_value = self.named(discord.TextChannel, "made")
+        made.create_voice_channel.return_value = self.named(discord.VoiceChannel, "made")
+        made.create_role.return_value = self.role("made", 0)
+        return made
+
+    async def test_running_the_setup_again_makes_nothing_the_server_already_has(self):
+        guild = self.guild()
+        self.assertTrue(await layout.build(guild))
+        self.assertTrue(await layout.build(guild))
+        guild.create_category.assert_not_awaited()
+        guild.create_text_channel.assert_not_awaited()
+        guild.create_voice_channel.assert_not_awaited()
+        guild.create_role.assert_not_awaited()
+
+    async def test_only_the_missing_channels_categories_and_roles_are_made(self):
+        guild = self.guild(missing={"Lebanon", "memes", "Cedar"})
+        self.assertTrue(await layout.build(guild))
+        guild.create_category.assert_awaited_once()
+        self.assertEqual(guild.create_category.call_args.args, ("Lebanon",))
+        guild.create_text_channel.assert_awaited_once()
+        self.assertEqual(guild.create_text_channel.call_args.args, ("memes",))
+        guild.create_voice_channel.assert_not_awaited()
+        guild.create_role.assert_awaited_once()
+        self.assertEqual(guild.create_role.call_args.kwargs["name"], "Cedar")
+        moved = self.by_name["diaspora"]
+        self.assertEqual(moved.edit.call_args.kwargs["category"],
+                         guild.create_category.return_value)

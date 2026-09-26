@@ -120,11 +120,14 @@ def changes(held, chosen, color_ids):
 
 
 async def install(guild, roles_channel):
-    """Create or update the color roles and the picker in #roles."""
+    """Create or update the color roles and the picker in #roles. A role
+    the server already has of that name is used as it is, so running the
+    setup again makes no color twice."""
     saved = _saved()
     wanted = {name for name, _, _ in COLORS}
     for name, value, _ in COLORS:
-        role = guild.get_role(saved["roles"].get(name) or 0)
+        role = guild.get_role(saved["roles"].get(name) or 0) or discord.utils.get(
+            guild.roles, name=name)
         if role is None:
             role = await guild.create_role(
                 name=name, colour=discord.Colour(value),
