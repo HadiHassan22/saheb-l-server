@@ -5,6 +5,8 @@
 - Light: small shared things: an event, a temporary voice channel, a
   thread, a pin. They happen at once, are posted in #server-log with who
   asked, are limited per member, and can be undone by vote.
+- Admin: done on an admin's word alone, posted in #server-log with who
+  asked: giving an existing role to every member of the server.
 
 Each function returns what to tell the member, or raises Refused.
 """
@@ -217,6 +219,41 @@ async def pin(member, link, pinned=True):
     await layout.server_log(guild, f"{member.display_name} {done} a message in "
                                    f"#{target.name}: {message.jump_url}")
     return f"Done: {done}."
+
+
+# ---------- admin ----------
+
+async def give_role_to_all(member, name):
+    """Give every member of the server the existing role `name`, asked for
+    by `member`, who must be an admin (the caller checks). Only roles made
+    by vote go round the whole server, so no role with powers ever does.
+    Posted in #server-log with who asked. Returns what to tell them, or
+    raises Refused."""
+    guild = member.guild
+    wanted = str(name or "").strip().lstrip("@")
+    roles = actions.voted_roles()
+    role = next((r for r in guild.roles
+                 if r.id in roles and r.name.lower() == wanted.lower()), None)
+    if role is None:
+        raise Refused("That isn't a role made by vote, so it can't go to everyone. "
+                      "Ask me to list the roles.")
+    given, missed = 0, 0
+    for one in guild.members:
+        if any(r.id == role.id for r in one.roles):
+            continue  # it already has it
+        try:
+            await one.add_roles(role, reason=f"Asked for by {member.display_name}")
+        except discord.HTTPException:
+            missed += 1
+            continue
+        given += 1
+    await layout.server_log(guild, f"<@{member.id}> gave every member the role "
+                                   f"{role.name} ({given} newly given it).")
+    said = (f"Everyone already has {role.name}." if not given and not missed
+            else f"Done: {role.name} is now on {given} member{'s' * (given != 1)}.")
+    if missed:
+        said += f" Left out {missed} member{'s' * (missed != 1)} I can't act on."
+    return said
 
 
 # ---------- temporary voice channels close themselves ----------
