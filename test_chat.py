@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import types
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -34,6 +35,7 @@ import store
 import voting_ui
 
 NOW = 1_800_000_000
+BOOSTING = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def fake(cls, id, name, **fields):
@@ -54,7 +56,7 @@ def guild():
     hangout.channels, voice.channels = [general, cars, welcome], [gaming]
     everything = [hangout, voice, general, cars, welcome, gaming]
     g = types.SimpleNamespace(id=99, channels=everything, categories=[hangout, voice],
-                              stickers=[], sticker_limit=5)
+                              roles=[], stickers=[], sticker_limit=5)
     g.get_channel = lambda cid: next((c for c in everything if c.id == cid), None)
     return g
 
@@ -200,12 +202,14 @@ def attachment(content_type, data, size=None):
 
 
 class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
-    def ctx(self, attachments=()):
-        return assistant.Context(guild=self.guild, member=types.SimpleNamespace(
-            id=7, display_name="Hadi"), attachments=list(attachments))
+    def ctx(self, attachments=(), boosting=False):
+        member = fake(discord.Member, 7, "Hadi", display_name="Hadi",
+                      premium_since=BOOSTING if boosting else None)
+        return assistant.Context(guild=self.guild, member=member,
+                                 attachments=list(attachments))
 
-    async def talk(self, *replies, text="hi", attachments=()):
-        ctx = self.ctx(attachments)
+    async def talk(self, *replies, text="hi", attachments=(), boosting=False):
+        ctx = self.ctx(attachments, boosting)
         with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=list(replies))) as c:
             answer = await assistant.respond(ctx, [], text)
         return ctx, answer, c
@@ -295,6 +299,34 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.drafts, [])
         self.assertIn("512 KB", tool_result(calls)["error"])
 
+    async def test_only_a_member_boosting_the_server_asks_for_a_role(self):
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_role_change", {"change": "create_role", "name": "Gamers"})]),
+            reply("Boost the server first."))
+        self.assertEqual(ctx.drafts, [])
+        self.assertIn("boost", tool_result(calls)["error"].lower())
+
+    async def test_a_member_boosting_the_server_asks_for_a_role(self):
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_role_change", {"change": "create_role", "name": "Gamers",
+                                               "picker": "Interests"})]),
+            reply("Drafted it."), boosting=True)
+        self.assertEqual([d["title"] for d in ctx.drafts], ["Create the role Gamers"])
+        self.assertNotIn("error", tool_result(calls))
+
+    async def test_an_admin_asks_for_a_role_without_boosting(self):
+        async def ship(client, guild, opener, admin_id):
+            return proposals.pass_now(opener(NOW)["no"], admin_id, NOW), "Done: it exists."
+        ctx = assistant.Context(guild=self.guild, admin=True,
+                                member=fake(discord.Member, 7, "Hadi", display_name="Hadi",
+                                            premium_since=None))
+        with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=[
+                reply(calls=[("draft_role_change", {"change": "create_role", "name": "Gamers"})]),
+                reply("Done.")])) as calls, \
+                mock.patch("voting_ui.ship", mock.AsyncMock(side_effect=ship)):
+            await assistant.respond(ctx, [], "make a Gamers role")
+        self.assertNotIn("error", tool_result(calls))
+        self.assertEqual(proposals.all_proposals()[0]["title"], "Create the role Gamers")
 
     async def test_an_admins_request_is_done_at_once_except_deleting(self):
         async def ship(client, guild, opener, admin_id):
