@@ -165,7 +165,8 @@ TOOLS = [
                  "channel_type": {"type": "string", "enum": ["text", "voice"]},
                  "topic": S, "slowmode": I, "roles": {"type": "array", "items": S}}),
     _draft_tool("draft_role_change",
-                "Draft a proposal about a role. Roles give no powers. create_role (name, "
+                "Draft a proposal about a role. Roles give no powers, and only a member "
+                "boosting the server can ask for one to be made. create_role (name, "
                 "color like #1E88E5, joinable: members take it themselves and can ping it, "
                 "true unless asked otherwise; picker: the #roles picker it belongs in: an "
                 "existing one if the role is the same kind of thing as its roles, else a new "
@@ -521,6 +522,16 @@ async def _draft_action(ctx, args):
     return await _draft(ctx, proposals.ACTION, title, details, action)
 
 
+async def _draft_role_change(ctx, args):
+    """Asking for a role to be made is for members boosting the server;
+    anyone else is told to boost first. Admins ask for anything."""
+    if (args.get("change") == actions.ROLE_CREATE and not ctx.admin
+            and ctx.member.premium_since is None):
+        raise quick.Refused("Asking for a custom role is for members boosting the server. "
+                            "Boost the server first, then ask me again.")
+    return await _draft_action(ctx, args)
+
+
 async def _draft_cancel_event(ctx, args):
     return await _draft_action(ctx, {**args, "change": actions.EVENT_CANCEL})
 
@@ -578,7 +589,7 @@ _TOOLS = {
     "create_event": _create_event, "cancel_my_event": _cancel_my_event,
     "create_temp_voice": _create_temp_voice, "start_thread": _start_thread,
     "pin_message": _pin_message, "unpin_message": _unpin_message,
-    "draft_channel_change": _draft_action, "draft_role_change": _draft_action,
+    "draft_channel_change": _draft_action, "draft_role_change": _draft_role_change,
     "draft_emoji_change": _draft_action, "draft_sticker_change": _draft_action,
     "draft_server_change": _draft_action,
     "draft_rules_change": _draft_action, "draft_watch_words_change": _draft_action,
