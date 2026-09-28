@@ -265,7 +265,7 @@ class Texts(unittest.TestCase):
         self.assertIn("<#1>", guide)            # where to talk to the bot
         self.assertIn("<#2>", guide)            # where the votes are
         for said in ("Beirut", "invite link", "/propose", "/appeal", "cosmetic",
-                     "without a vote", "temporary voice channel"):
+                     "without a vote", "temporary voice channel", "soundboard"):
             self.assertIn(said, guide)
         self.assertNotIn("—", guide)            # the bot never uses an em dash
 
