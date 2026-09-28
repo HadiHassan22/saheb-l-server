@@ -185,6 +185,69 @@ class Stickers(WithTempData):
         self.assertLessEqual(len(details), 4000)                 # one embed
 
 
+class Sounds(WithTempData):
+    """Sounds on the soundboard by vote, mirroring stickers: a name and an
+    attached sound file in, a name out. Members play them in voice
+    channels, and the bot keeps the set small."""
+
+    def sound(self, id, name):
+        s = mock.Mock(spec=discord.SoundboardSound)
+        s.id, s.name = id, name
+        s.delete = mock.AsyncMock()
+        return s
+
+    def guild(self, sounds=()):
+        g = mock.create_autospec(discord.Guild, instance=True)
+        g.soundboard_sounds = list(sounds)
+        return g
+
+    async def test_adding_a_sound_puts_the_attached_sound_file_on_the_board(self):
+        g = self.guild()
+        action = {"kind": actions.SOUND_ADD, "name": "quack",
+                  "image": actions.save_image(b"mp3")}
+        self.assertIsNone(await actions.check(g, action))
+        said = await actions.carry_out(g, action)
+        g.create_soundboard_sound.assert_awaited_once()
+        kwargs = g.create_soundboard_sound.call_args.kwargs
+        self.assertEqual((kwargs["name"], kwargs["sound"], kwargs["reason"]),
+                         ("quack", b"mp3", actions.REASON))
+        self.assertIn("quack is on the soundboard", said)
+
+    async def test_removing_a_sound_deletes_the_one_by_that_name(self):
+        s = self.sound(40, "quack")
+        g = self.guild([s])
+        action = {"kind": actions.SOUND_REMOVE, "name": "quack"}
+        self.assertIsNone(await actions.check(g, action))
+        self.assertEqual(action["sound_id"], 40)
+        said = await actions.carry_out(g, action)
+        s.delete.assert_awaited_once_with(reason=actions.REASON)
+        self.assertIn("quack is removed", said)
+
+    async def test_a_sound_needs_a_short_name_a_sound_file_and_a_free_slot(self):
+        g = self.guild([self.sound(40, "quack")])
+        self.assertIn("2 to 32 characters", await actions.check(
+            g, {"kind": actions.SOUND_ADD, "name": "x", "image": "i"}))
+        self.assertIn("already a sound", await actions.check(
+            g, {"kind": actions.SOUND_ADD, "name": "quack", "image": "i"}))
+        self.assertIn("Attach the sound file", await actions.check(
+            self.guild(), {"kind": actions.SOUND_ADD, "name": "nyan"}))
+        full = self.guild([self.sound(i, f"s{i}") for i in range(actions.MAX_SOUNDS)])
+        self.assertIn("full", await actions.check(
+            full, {"kind": actions.SOUND_ADD, "name": "nyan", "image": "i"}))
+        self.assertIn("no sound by that name", await actions.check(
+            g, {"kind": actions.SOUND_REMOVE, "name": "nyan"}))
+
+    def test_the_proposal_says_what_will_happen(self):
+        title, details = actions.describe({"kind": actions.SOUND_ADD, "name": "quack"})
+        self.assertEqual(title, "Add the sound quack")
+        self.assertIn("sound **quack**", details)
+        self.assertIn("voice channels", details)
+        title, details = actions.describe({"kind": actions.SOUND_REMOVE, "name": "quack"})
+        self.assertEqual(title, "Remove the sound quack")
+        self.assertLessEqual(len("Proposal 99: " + title), 256)  # a card's title
+        self.assertLessEqual(len(details), 4000)                 # one embed
+
+
 class People(WithTempData):
     def people_guild(self, target_position=1):
         g = guild()

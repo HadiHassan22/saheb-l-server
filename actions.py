@@ -47,6 +47,7 @@ CATEGORY_CREATE, CATEGORY_RENAME, CATEGORY_DELETE = (
 ROLE_CREATE, ROLE_EDIT, ROLE_DELETE = "create_role", "edit_role", "delete_role"
 EMOJI_ADD, EMOJI_REMOVE = "add_emoji", "remove_emoji"
 STICKER_ADD, STICKER_REMOVE = "add_sticker", "remove_sticker"
+SOUND_ADD, SOUND_REMOVE = "add_sound", "remove_sound"
 SERVER_NAME, SERVER_ICON = "rename_server", "set_server_icon"
 RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
@@ -61,14 +62,16 @@ CHANNEL_KINDS = (CREATE, RENAME, DELETE, TOPIC, SLOWMODE, PURGE, ACCESS,
 ROLE_KINDS = (ROLE_CREATE, ROLE_EDIT, ROLE_DELETE)
 EMOJI_KINDS = (EMOJI_ADD, EMOJI_REMOVE)
 STICKER_KINDS = (STICKER_ADD, STICKER_REMOVE)
+SOUND_KINDS = (SOUND_ADD, SOUND_REMOVE)
 SERVER_KINDS = (SERVER_NAME, SERVER_ICON)
 RULE_KINDS = (RULE_EDIT, RULE_ADD, RULE_REMOVE)
 WATCH_KINDS = (WATCH_ADD, WATCH_REMOVE)
 PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
-KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SERVER_KINDS + RULE_KINDS
-         + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS + ONBOARDING_KINDS)
+KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SOUND_KINDS + SERVER_KINDS
+         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS
+         + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
@@ -78,6 +81,7 @@ TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
 MAX_CHANNELS, MAX_ROLES, MAX_RULES = 450, 100, 20
 MAX_EMOJI_BYTES, MAX_STICKER_BYTES, MAX_ICON_BYTES = 256 * 1024, 512 * 1024, 4 * 1024 * 1024
+MAX_SOUND_BYTES, MAX_SOUNDS = 512 * 1024, 5  # the soundboard keeps a small set
 REASON = "Ordered by a community vote"
 
 
@@ -121,8 +125,8 @@ def _forget_role(role_id):
 
 
 def save_image(data):
-    """Keep an attached image until the vote closes; Discord's attachment
-    links expire sooner than that. Returns its name."""
+    """Keep an attached file (an image or a sound) until the vote closes;
+    Discord's attachment links expire sooner than that. Returns its name."""
     folder = store.DATA_DIR / "images"
     folder.mkdir(parents=True, exist_ok=True)
     name = uuid.uuid4().hex
@@ -156,6 +160,8 @@ async def check(guild, action):
         return _check_emoji(guild, action)
     if kind in STICKER_KINDS:
         return _check_sticker(guild, action)
+    if kind in SOUND_KINDS:
+        return _check_sound(guild, action)
     if kind in SERVER_KINDS:
         return _check_server(guild, action)
     if kind in RULE_KINDS:
@@ -521,6 +527,28 @@ def _check_sticker(guild, action):
     return None
 
 
+def _check_sound(guild, action):
+    """A sound on the soundboard, played in voice channels. The bot keeps
+    the set small: at most MAX_SOUNDS, added and removed by vote."""
+    name = str(action.get("name") or "").strip()
+    if action["kind"] == SOUND_ADD:
+        if not 2 <= len(name) <= 32:
+            return "A sound name is 2 to 32 characters."
+        if discord.utils.get(guild.soundboard_sounds, name=name):
+            return f"There's already a sound called {name}."
+        if not action.get("image"):
+            return "Attach the sound file to your message."
+        if len(guild.soundboard_sounds) >= MAX_SOUNDS:
+            return "The soundboard holds a small set of sounds, and it's full."
+        action["name"] = name
+        return None
+    sound = discord.utils.get(guild.soundboard_sounds, name=name)
+    if sound is None:
+        return "There's no sound by that name."
+    action["name"], action["sound_id"] = sound.name, sound.id
+    return None
+
+
 def _check_server(guild, action):
     if action["kind"] == SERVER_NAME:
         name = str(action.get("name") or "").strip()
@@ -668,6 +696,11 @@ def describe(action):
                               f"Add the attached image as the sticker **{a['name']}**."),
         STICKER_REMOVE: lambda: (f"Remove the sticker {a['name']}",
                                  f"Remove the sticker **{a['name']}**."),
+        SOUND_ADD: lambda: (f"Add the sound {a['name']}",
+                            f"Add the attached sound file as the sound **{a['name']}** on "
+                            "the soundboard, which members play in voice channels."),
+        SOUND_REMOVE: lambda: (f"Remove the sound {a['name']}",
+                               f"Remove the sound **{a['name']}** from the soundboard."),
         SERVER_NAME: lambda: ("Rename the server", f"Rename the server to **{a['name']}**."),
         SERVER_ICON: lambda: ("New server icon", "Set the attached image as the server icon."),
         RULE_EDIT: lambda: (f"Reword rule {a['number']}", f"Change rule {a['number']} to: "
@@ -812,6 +845,13 @@ async def _carry_out(guild, action):
     if kind == STICKER_REMOVE:
         await discord.utils.get(guild.stickers, id=a["sticker_id"]).delete(reason=REASON)
         return f"Done: the sticker {a['name']} is removed."
+    if kind == SOUND_ADD:
+        await guild.create_soundboard_sound(name=a["name"], sound=load_image(a["image"]),
+                                            reason=REASON)
+        return f"Done: the sound {a['name']} is on the soundboard."
+    if kind == SOUND_REMOVE:
+        await discord.utils.get(guild.soundboard_sounds, id=a["sound_id"]).delete(reason=REASON)
+        return f"Done: the sound {a['name']} is removed."
     if kind == SERVER_NAME:
         await guild.edit(name=a["name"], reason=REASON)
         return f"Done: the server is now called {a['name']}."
@@ -1025,7 +1065,7 @@ class ServerChange(kinds.Kind):
         try:
             said = await carry_out(guild, {**p["action"],
                                            "by_admin": bool(p.get("shipped_by"))})
-        except (discord.HTTPException, OSError) as e:
+        except (discord.HTTPException, OSError, ValueError) as e:
             said = f"It couldn't be done: {getattr(e, 'status', '') or e.__class__.__name__}."
         log.info(f"proposal {p['no']}: {said}")
         await layout.server_log(guild, f"Proposal {p['no']} ({p['title']}): {said}")

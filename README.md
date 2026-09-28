@@ -133,6 +133,18 @@ to each member's first message of the day. One greeting per member per
 day, in that channel alone. It only notices who posted and when, never
 what the message says.
 
+## The soundboard
+
+Every voice channel has Discord's soundboard: the button in the voice bar
+plays a short sound for everyone there. Alongside Discord's own sounds it
+carries the server's own, a small set: at most 5 sounds at a time. A
+member adds one the way emojis and stickers are added: ask the bot in
+`#ask-saheb` with the sound file attached (MP3, up to 512 KB) and it
+drafts a proposal; the sound goes on the board when the vote passes. An
+admin's ask is done at once. Removing a sound takes the same kind of
+vote. Members play the sounds with Discord's own soundboard in any voice
+channel; the bot never plays them itself.
+
 ## Talking to the bot
 
 All of this is written up for members in the tutorial the bot posts in
@@ -145,9 +157,11 @@ messages that tag it or reply to it, so members can also talk to each
 other there. It is the only channel where the bot reads what ordinary
 messages say. If such a message has an image attached, the bot can see it too
 (up to 3 images, 5 MB each) and use what's in it, for example drafting an
-emoji, a sticker or the server's icon straight from the attachment. The model
-understands the request, and code decides what is allowed: every tool is
-in one of four tiers, fixed in `assistant.py`.
+emoji, a sticker or the server's icon straight from the attachment. A sound
+file attached the same way can become a sound on the soundboard (see
+[The soundboard](#the-soundboard)). The model understands the request, and
+code decides what is allowed: every tool is in one of four tiers, fixed in
+`assistant.py`.
 
 | Tier | Rule | What |
 | --- | --- | --- |
@@ -166,6 +180,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Onboarding | the questions new members answer when they join (each answer shows channels and/or gives joinable roles), and the channels they see from the start |
 | Emojis | add (from an image attached in `#ask-saheb`), remove |
 | Stickers | add (from an image attached in `#ask-saheb`), remove |
+| Soundboard | add (from a sound file attached in `#ask-saheb`), remove |
 | The server | rename it; set its icon |
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
 | AutoMod | add or remove watch words; blocked words stay |
@@ -487,7 +502,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 36 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 37 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |

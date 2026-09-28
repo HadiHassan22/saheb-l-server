@@ -56,7 +56,7 @@ def guild():
     hangout.channels, voice.channels = [general, cars, welcome], [gaming]
     everything = [hangout, voice, general, cars, welcome, gaming]
     g = types.SimpleNamespace(id=99, channels=everything, categories=[hangout, voice],
-                              roles=[], stickers=[], sticker_limit=5)
+                              roles=[], stickers=[], sticker_limit=5, soundboard_sounds=[])
     g.get_channel = lambda cid: next((c for c in everything if c.id == cid), None)
     return g
 
@@ -298,6 +298,36 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
             reply("Too big."), attachments=[big])
         self.assertEqual(ctx.drafts, [])
         self.assertIn("512 KB", tool_result(calls)["error"])
+
+    async def test_a_sound_draft_keeps_the_attached_sound_file(self):
+        song = attachment("audio/mpeg", b"mp3")
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_sound_change", {"change": "add_sound", "name": "quack",
+                                                 "attachment": 1})]),
+            reply("Drafted it."), attachments=[song])
+        draft = ctx.drafts[0]
+        self.assertEqual(draft["title"], "Add the sound quack")
+        self.assertEqual(draft["payload"]["kind"], actions.SOUND_ADD)
+        self.assertEqual(actions.load_image(draft["payload"]["image"]), b"mp3")
+        self.assertIn("button", tool_result(calls)["note"])
+
+    async def test_a_sound_file_over_the_limit_is_refused(self):
+        big = attachment("audio/mpeg", b"x", size=actions.MAX_SOUND_BYTES + 1)
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_sound_change", {"change": "add_sound", "name": "quack",
+                                                 "attachment": 1})]),
+            reply("Too big."), attachments=[big])
+        self.assertEqual(ctx.drafts, [])
+        self.assertIn("512 KB", tool_result(calls)["error"])
+
+    async def test_only_a_sound_file_becomes_a_sound(self):
+        picture = attachment("image/png", b"pixels")
+        ctx, _, calls = await self.talk(
+            reply(calls=[("draft_sound_change", {"change": "add_sound", "name": "quack",
+                                                 "attachment": 1})]),
+            reply("That isn't a sound."), attachments=[picture])
+        self.assertEqual(ctx.drafts, [])
+        self.assertIn("sound file", tool_result(calls)["error"])
 
     async def test_only_a_member_boosting_the_server_asks_for_a_role(self):
         ctx, _, calls = await self.talk(
