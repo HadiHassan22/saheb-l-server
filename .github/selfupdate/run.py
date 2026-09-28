@@ -246,16 +246,30 @@ def record(p, branch, outcome, body):
         gh("label", "create", name, "--color", colour, "--force")
     labels = ["self-update"] + ([outcome] if outcome in LABELS else [])
     tries = p.get("attempt", 1)
+    body = f"Proposal {p['no']}. {approval(p)}\n\n{body}"
     url = gh("pr", "create", "--base", "main", "--head", branch,
              "--title", (f"Proposal {p['no']}" + (f" (try {tries})" if tries > 1 else "")
                          + f": {p['title']}")[:250],
-             "--body", f"Proposal {p['no']}. {approval(p)}\n\n{body}",
+             "--body", body,
              *sum((["--label", label] for label in labels), []))
     if outcome != "merged":
         gh("pr", "close", url)
         print(f"Recorded proposal {p['no']} as {outcome}: {url}")
         return None
-    gh("pr", "merge", url, "--squash", "--delete-branch")
+    try:
+        gh("pr", "merge", url, "--squash", "--delete-branch")
+    except subprocess.CalledProcessError as e:
+        # Most likely main changed while the change was being written and
+        # the two conflict. Left open, the pull request would read as still
+        # being written, and /admin retry would refuse it.
+        print(e.stderr)
+        gh("pr", "edit", url, "--add-label", "failed", "--body",
+           body + "\n\n**Why it wasn't merged**\n- It couldn't be merged: most likely it "
+                  "conflicts with a change merged while it was being written. An admin "
+                  "can try it again with /admin retry.")
+        gh("pr", "close", url)
+        print(f"Recorded proposal {p['no']} as failed, it couldn't be merged: {url}")
+        return None
     sha = gh("pr", "view", url, "--json", "mergeCommit", "--jq", ".mergeCommit.oid")
     print(f"Merged proposal {p['no']} as {sha}: {url}")
     return sha

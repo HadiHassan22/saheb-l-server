@@ -514,6 +514,54 @@ class Writer(unittest.TestCase):
         self.assertIn("/admin retry", recorded["body"])
 
 
+class Recording(unittest.TestCase):
+    """A change that can't be merged is closed as failed, so an admin can
+    retry it, and every run writes on main as it is when the run starts."""
+
+    def recorded(self, merge_fails):
+        calls = []
+
+        def gh(*args):
+            calls.append(args)
+            if args[:2] == ("pr", "create"):
+                return "https://example.invalid/pull/17"
+            if args[:2] == ("pr", "merge") and merge_fails:
+                raise subprocess.CalledProcessError(1, "gh", stderr="not mergeable")
+            return "abc1234"
+        with mock.patch.object(selfupdate_run, "gh", gh), \
+                mock.patch.object(selfupdate_run, "push"), \
+                mock.patch.object(selfupdate_run, "run"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            sha = selfupdate_run.record({"no": 64, "title": "Greeting", "shipped": True},
+                                        "proposal-64", "merged", "Moved it.")
+        return sha, calls
+
+    def test_a_merge_that_fails_is_closed_as_failed(self):
+        sha, calls = self.recorded(merge_fails=True)
+        self.assertIsNone(sha)
+        edit = next(c for c in calls if c[:2] == ("pr", "edit"))
+        self.assertIn("failed", edit)
+        body = edit[edit.index("--body") + 1]
+        self.assertTrue(body.startswith("Proposal 64. "))
+        self.assertIn("Moved it.", body)
+        self.assertIn("/admin retry", body)
+        self.assertIn(("pr", "close", "https://example.invalid/pull/17"), calls)
+        # updates.py then reads it as failed, which /admin retry accepts.
+        pr = {"head": {"ref": "proposal-64"}, "state": "closed", "merged_at": None,
+              "labels": [{"name": "self-update"}, {"name": "failed"}]}
+        self.assertEqual(updates.stage_of(pr), updates.FAILED)
+        self.assertIn(updates.FAILED, updates.RETRYABLE)
+
+    def test_a_merge_that_works_returns_its_commit(self):
+        sha, calls = self.recorded(merge_fails=False)
+        self.assertEqual(sha, "abc1234")
+        self.assertFalse(any(c[:2] in (("pr", "edit"), ("pr", "close")) for c in calls))
+
+    def test_the_workflow_checks_out_main_as_it_is_now(self):
+        workflow = (HERE / ".github" / "workflows" / "self-update.yml").read_text()
+        self.assertIn("ref: main", workflow)
+
+
 class Reviewing(unittest.TestCase):
     """Only a change members voted for is reviewed."""
 

@@ -34,6 +34,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          # Main as it is when this run starts, not the commit it was
+          # queued at: a run waiting behind another must see what that one
+          # merged, or it writes on an old main and conflicts.
+          ref: main
           fetch-depth: 0
           # Keep the token out of .git/config, where Claude Code could read it.
           persist-credentials: false
