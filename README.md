@@ -29,8 +29,8 @@ do anything a vote can, at once and without a vote: they ask the bot in
 #ask-saheb and it's done, no questions asked, whether that's changing
 channels, roles, settings or the rules, kicking or banning, overturning a
 moderation case, making someone an admin, or having the bot's code
-changed. Deleting a channel or category waits for them to confirm. They
-can also take down any open proposal. The Admin role is the only role
+changed. Deleting a channel or category, or a code change, waits for
+them to confirm. They can also take down any open proposal. The Admin role is the only role
 with Discord's own powers (Administrator), so they can also act directly;
 the bot keeps that role on the admins alone. Everything they do, through
 the bot or directly (read from Discord's audit log), is posted in
@@ -183,10 +183,12 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   vote, and the bot says what came of it. Admins also get three tools
   members don't: making or removing admins, overturning a moderation
   case, and giving an existing role to every member at once.
-  Deleting a channel or category, or clearing a channel's history, is the
-  exception: it comes back as a draft with a **Ship it** button to
-  confirm, since the history is lost for good. A code change still goes
-  through the self-update workflow's checks. `/admin withdraw` takes down any open
+  Deleting a channel or category, clearing a channel's history, and a
+  general proposal (which becomes a code change) are the exceptions: they
+  come back as a draft with a **Ship it** button to confirm first, since
+  the history is lost for good and a code change rewrites the bot itself.
+  A code change still goes through the self-update workflow's checks.
+  `/admin withdraw` takes down any open
   proposal, `/admin retry` has a code change that failed, changed nothing
   or was rolled back tried again, `/admin chat-limit` switches the chat
   limit, and `/admin github` shows admins, and only them, where the code

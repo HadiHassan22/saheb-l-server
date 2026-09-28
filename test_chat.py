@@ -142,12 +142,15 @@ class System(unittest.TestCase):
         for name in ("set_admin", "overturn_case", "give_role_to_all"):
             self.assertIn(name, assistant.SYSTEM)
 
-    def test_only_irreversible_channel_changes_need_confirming(self):
+    def test_irreversible_changes_and_code_changes_need_confirming(self):
         for kind in (actions.DELETE, actions.CATEGORY_DELETE, actions.PURGE):
             self.assertTrue(assistant.needs_confirming(
                 proposals.ACTION, {"kind": kind}))
         self.assertFalse(assistant.needs_confirming(
             proposals.ACTION, {"kind": actions.TOPIC}))
+        self.assertTrue(assistant.needs_confirming(proposals.GENERAL, {}))
+        self.assertFalse(assistant.needs_confirming(proposals.SETTING, {}))
+        self.assertFalse(assistant.needs_confirming(proposals.APPEAL, {}))
 
 
 class Tiers(unittest.TestCase):
@@ -350,6 +353,22 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(proposals.all_proposals()[0]["shipped_by"], 7)
         self.assertIn("Ship it", deleting["note"])
         self.assertEqual([d["title"] for d in ctx.drafts], ["Delete cars"])
+
+    async def test_an_admins_code_change_is_confirmed_before_it_is_filed(self):
+        ctx = assistant.Context(guild=self.guild, member=types.SimpleNamespace(
+            id=7, display_name="Hadi"), admin=True)
+        with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=[
+                reply(calls=[("draft_proposal", {"title": "Trivia",
+                                                 "details": "A trivia game."})]),
+                reply("Confirm it with the button.")])) as calls, \
+                mock.patch("voting_ui.ship", mock.AsyncMock()) as ship:
+            await assistant.respond(ctx, [], "add a trivia game")
+        ship.assert_not_awaited()
+        self.assertEqual(proposals.all_proposals(), [])
+        self.assertEqual([d["title"] for d in ctx.drafts], ["Trivia"])
+        result = tool_result(calls)
+        self.assertIn("confirm", result["note"].lower())
+        self.assertIn("Ship it", result["note"])
 
     async def test_a_member_who_isnt_an_admin_only_gets_a_draft(self):
         with mock.patch("voting_ui.ship", mock.AsyncMock()) as ship:
