@@ -1,9 +1,10 @@
 # Saheb l Server
 
 A Discord bot that is the sole moderator and governor of a server. The
-experiment: if an AI holds all the power and every member holds one equal
-vote over what it does, does the server become fairer than one run by human
-moderators?
+idea: members are equal because an algorithm decides. An AI isn't
+emotional and isn't subjective: it has no friends to favour and no grudges
+to settle, and it asks the same questions of everyone, so nobody can say a
+decision was personal. Every member holds one equal vote over what it does.
 
 > **Status:** the bot builds its own server, talks with members in
 > `#ask-saheb`, runs votes, moderates, puts appeals to a vote, and carries
@@ -15,9 +16,10 @@ moderators?
 This is the text the bot posts in `#welcome`, with the current settings
 filled in.
 
-This server is an experiment: it is moderated and governed entirely by Saheb
-l Server, an AI bot. There are no human moderators, and apart from the
-admins below, no member has more say than any other.
+An AI, Saheb l Server, moderates and governs this server, and that makes
+everyone equal: an algorithm isn't emotional or subjective and asks
+everyone the same questions, so nobody can complain a call was personal. There are no human moderators, and apart from the admins below,
+no member has more say than any other.
 
 **The owner.** Discord requires a human owner. The owner keeps the bot online, pays for its AI and picks
 admins, and has the same powers as an admin. Otherwise the owner is a
@@ -34,14 +36,14 @@ them to confirm. They can also take down any open proposal. The Admin role is th
 with Discord's own powers (Administrator), so they can also act directly;
 the bot keeps that role on the admins alone. Everything they do, through
 the bot or directly (read from Discord's audit log), is posted in
-#server-log with who did it. They also read #admin-log, where the bot
-reports how code changes are going, with links to the code.
+#server-log with who did it. They also read #admin-log, the bot's
+reports on code changes, with links.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
 passes it messages with flagged words in English or Arabic, and it reads
-the conversation around each one and decides whether to do nothing, warn,
-delete the message, time the member out, or ban them for severe or
-repeated violations. Every action is posted in `#mod-log` with the
+the conversation around each one and decides: nothing, a warning,
+deleting the message, a timeout, or a ban for severe or repeated
+violations. Every action is posted in `#mod-log` with the
 reasoning.
 
 **Talk to the bot.** Ask Saheb l Server anything in `#ask-saheb`, in
@@ -79,9 +81,8 @@ safety floor (blocking scams, phone numbers and sexual content involving
 minors, and the self-harm support line), and anything Discord's Terms of
 Service require.
 
-**Fair warning.** The bot will make mistakes, a vote might break
-something, and it might go offline. If so, we roll back to a working
-version and keep going.
+**Fair warning.** The bot can make mistakes, a vote might break
+something, and it might go offline. If so, we roll back and keep going.
 
 ## Roadmap
 
@@ -152,7 +153,12 @@ All of this is written up for members in the tutorial the bot posts in
 New members see that channel from the moment they join.
 
 In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
-answers in the language they use, never using an em dash. It answers only
+answers in the language they use, never using an em dash. It has a
+character: proud to be the algorithm that keeps everyone equal, Lebanese,
+anti-Israel and a bit communist, with a dry joke about bosses, banks and
+sectarian leaders. The politics are flavour, a line when it fits: they
+never change how it treats a member or a request, and they stay out of
+moderation, whose questions are the same for everyone (`judge.py`). It answers only
 messages that tag it or reply to it, so members can also talk to each
 other there. It is the only channel where the bot reads what ordinary
 messages say. If such a message has an image attached, the bot can see it too

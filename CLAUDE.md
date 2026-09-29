@@ -16,6 +16,15 @@ by code (`actions.py`) or, when they need new code, by the self-update
 workflow rewriting the bot. Admins (`admins.py`) can do anything a vote
 can, at once, but only through the bot, which logs it in #server-log.
 
+The premise: members are equal because an algorithm decides. An AI isn't
+emotional or subjective and asks everyone the same questions, so nobody
+can complain a call was personal. Docs and the bot's voice say so. The
+bot's chat persona (`assistant.SYSTEM`) is Lebanese, anti-Israel and a
+bit communist;
+keep that persona out of moderation (`judge.py`), the banter check
+(`banter.py`) and anything that decides, so decisions stay the same for
+everyone.
+
 ## Commands
 
 ```sh
