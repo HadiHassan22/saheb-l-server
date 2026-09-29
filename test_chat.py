@@ -71,8 +71,16 @@ class WithTempData(unittest.TestCase):
             layout, "channel",
             lambda g, name: next((c for c in g.channels if c.name == name), None))
         self._layout.start()
+        # The banter check never reaches the network here: it lets every
+        # draft through unless a test says otherwise.
+        self._banter = [mock.patch.object(ai, "first_check", mock.AsyncMock(return_value={})),
+                        mock.patch.object(admins, "post", mock.AsyncMock(return_value=True))]
+        for patch in self._banter:
+            patch.start()
 
     def tearDown(self):
+        for patch in self._banter:
+            patch.stop()
         self._layout.stop()
         store.DATA_DIR = self._saved_dir
         shutil.rmtree(self._tmp)

@@ -12,6 +12,7 @@ rules can be removed, because the moderator's questions refer to them by
 number. Added rules can be edited and removed.
 """
 
+import banter
 import settings
 import store
 
@@ -86,6 +87,7 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 - Voting stays open for {s['voting_hours']} hours.
 - A proposal needs at least {s['quorum']} votes to count (or half the server's members, if that's fewer, but never under 3), and more than {s['pass_percent']}% yes to pass.
 - Members who have been here for {s['voter_min_days']} days can vote. Everyone who joined in the server's first week can vote right away.
+- Before a proposal opens, a check reads what you wrote and asks one question, the same for everyone: "{banter.QUESTION}" If it is at least {s['banter_percent']}% sure, the proposal is turned away. Setting changes skip it, so the check itself can always be voted on.
 
 **Votes are carried out automatically.** A passed change to the server, like a new channel, is made by the bot at once. Anything else is written as a code change, checked automatically and deployed, and what changed is posted under its proposal.
 

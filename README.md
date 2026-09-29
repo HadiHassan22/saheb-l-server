@@ -189,6 +189,15 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Settings | any of the settings, within its range |
 | Anything else | a general proposal, written as code by the self-update workflow |
 
+- **Banter is turned away first.** Before a member's draft is saved (or a
+  `/propose` opens), Jev, the same first check the moderator uses, reads
+  what the member actually wrote along with the draft, and answers one
+  question: "Is this banter rather than a real request to change the
+  server or the bot?" If it is at least `banter_percent` sure (80% to
+  start, 60 to 95), nothing is drafted and the bot says why. When it's
+  unsure, the proposal goes to a vote. Setting changes and admins skip
+  it, and so does everything while the AI is unavailable. Each check is
+  posted in `#admin-log` with its score (`banter.py`).
 - **Drafts are filed by the member, not the bot.** The reply carries a
   **File it** button that only the member who asked can press, once.
 - **Admins skip the vote.** For an admin (picked by the owner or an admin
@@ -392,6 +401,7 @@ Every number above is a setting the community can change by vote:
 | Yes votes needed to pass | more than 50% | 50% to 90% |
 | Time in the server before you can vote | 7 days | 0 to 90 days |
 | Open proposals per member | 3 | 1 to 20 |
+| How sure the banter check must be to turn a proposal away | 80% | 60% to 95% |
 | How long a warning or timeout counts | 30 days | 7 to 180 days |
 | Warnings before a timeout | 3 | 1 to 10 |
 | Length of a first timeout | 60 minutes | 10 to 1440 minutes |
@@ -523,6 +533,7 @@ one changed, and is told why it wasn't kept.
 | `ending.py` | Every way a proposal ends: its vote closes, or an admin passes or withdraws it |
 | `cards.py` | How a proposal looks in `#proposals`: its card and its result |
 | `automod.py` | The AutoMod rules and watch lists |
+| `banter.py` | The banter check a member's proposal passes before it opens; no Discord |
 | `judge.py` | The questions, routing, verdicts and sanction ladder; no Discord |
 | `moderator.py` | Handles AutoMod alerts, applies sanctions, posts cases; `/ai-key` |
 | `cases.py` | Numbered moderation cases and each member's record |

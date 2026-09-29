@@ -41,6 +41,14 @@ SETTINGS = {
         "label": "Open proposals per member",
         "describe": "{} at a time",
     },
+    # A member's draft is turned away when the banter check (banter.py) is
+    # at least this sure it is banter rather than a real request. Higher
+    # lets more through.
+    "banter_percent": {
+        "default": 80, "min": 60, "max": 95, "group": VOTING,
+        "label": "How sure the banter check must be to turn a proposal away",
+        "describe": "{}%",
+    },
     "warning_days": {
         "default": 30, "min": 7, "max": 180, "group": MODERATION,
         "label": "How long a warning or timeout counts against you",

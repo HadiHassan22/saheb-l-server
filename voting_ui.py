@@ -1,7 +1,8 @@
 """The Discord side of voting: /propose, /propose-setting, /settings, the
 vote buttons on each proposal's card, opening proposals, and closing votes
 when time is up. Also what admins can do to proposals (admins.py): pass
-one at once, and take one down with /admin withdraw.
+one at once, and take one down with /admin withdraw. And the banter check
+(banter.py) that a member's proposal passes before it is opened.
 
 How a proposal looks is in cards.py, and every way one ends in ending.py.
 """
@@ -14,11 +15,14 @@ from discord import app_commands
 from discord.ext import tasks
 
 import admins
+import ai
+import banter
 import cards
 import code_changes
 import ending
 import layout
 import proposals
+import providers
 import setting_changes
 import settings
 
@@ -80,14 +84,39 @@ def people(guild):
     return count - 1 if count else None
 
 
-async def publish(interaction, opener, guild=None, by_admin=False):
+async def banter_refusal(guild, member, asked, title, details):
+    """What to tell `member` if the banter check turns their proposal
+    away, or None to let it through (banter.py). Each check is posted in
+    #admin-log with its score. When the check can't run, the proposal goes
+    through: an outage never stops members proposing."""
+    try:
+        score = banter.score(await ai.first_check(banter.state(asked, title, details),
+                                                  banter.questions()))
+    except (ai.Unavailable, providers.ProviderError) as e:
+        log.warning(f"banter check skipped: {e}")
+        return None
+    s = settings.current()
+    away = banter.turned_away(score, s)
+    await admins.post(guild, f"Banter check, {score:.0%}, "
+                             f"{'turned away' if away else 'let through'}: "
+                             f"<@{member.id}>'s \"{title}\"")
+    return banter.refusal(score, s) if away else None
+
+
+async def publish(interaction, opener, guild=None, by_admin=False, screen=None):
     """Open a proposal with `opener(now)` and post it in the proposals
     channel, with a thread for discussion. Returns the proposal, or None if
     nothing was opened. `guild` is for interactions that arrive by DM.
     `by_admin` passes it at once and carries it out, as a passed vote
-    would be; checking that the member is an admin is the caller's job."""
+    would be; checking that the member is an admin is the caller's job.
+    `screen(guild)`, if given, is the banter check for a proposal the
+    member wrote themself; admins skip it."""
     await interaction.response.defer(ephemeral=True, thinking=True)
     guild = guild or interaction.guild
+    if screen is not None and not by_admin and not admins.allowed(interaction.user.id, guild):
+        refused = await screen(guild)
+        if refused:
+            return await interaction.followup.send(refused, ephemeral=True)
     try:
         if by_admin:
             p, said = await ship(interaction.client, guild, opener, interaction.user.id)
@@ -146,8 +175,10 @@ class ProposeForm(discord.ui.Modal, title="New proposal"):
     )
 
     async def on_submit(self, interaction):
+        title, details = self.name.value, self.details.value
         await publish(interaction, lambda now: code_changes.KIND.open(
-            interaction.user.id, self.name.value, self.details.value, now))
+            interaction.user.id, title, details, now),
+            screen=lambda guild: banter_refusal(guild, interaction.user, None, title, details))
 
 
 @app_commands.command(name="propose", description="Propose something for the server to vote on")

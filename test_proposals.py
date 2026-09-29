@@ -42,7 +42,7 @@ class Settings(WithTempData):
     def test_defaults_match_the_server_description(self):
         self.assertEqual(settings.current(), {
             "voting_hours": 24, "quorum": 5, "pass_percent": 50, "removal_percent": 66,
-            "voter_min_days": 7, "max_open_per_member": 3,
+            "voter_min_days": 7, "max_open_per_member": 3, "banter_percent": 80,
             "warning_days": 30, "warnings_before_timeout": 3,
             "first_timeout_minutes": 60, "repeat_timeout_hours": 24,
             "timeouts_before_ban": 2, "act_percent": 80, "review_percent": 30,
