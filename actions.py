@@ -53,6 +53,7 @@ RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
+NICKNAME = "rename_member"  # any member's nickname: give them one, or reset it
 PICKER_CREATE, PICKER_EDIT, PICKER_DELETE = "create_picker", "edit_picker", "delete_picker"
 ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE = (
     "set_onboarding_channels", "set_onboarding_question", "remove_onboarding_question")
@@ -70,7 +71,7 @@ PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SOUND_KINDS + SERVER_KINDS
-         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL,) + PEOPLE_KINDS + PICKER_KINDS
+         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL, NICKNAME) + PEOPLE_KINDS + PICKER_KINDS
          + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
@@ -619,7 +620,10 @@ async def _check_member(guild, action):
     if target is None:
         return "Mention the member (@name) so there's no doubt who is meant."
     action["member"] = str(target)
-    if target in (guild.owner_id, guild.me.id):
+    if action["kind"] == NICKNAME:
+        if target == guild.owner_id:
+            return "Discord doesn't let bots change the server owner's nickname."
+    elif target in (guild.owner_id, guild.me.id):
         return "That member can't be removed by the bot."
     if action["kind"] == UNBAN:
         try:
@@ -635,6 +639,11 @@ async def _check_member(guild, action):
     if found.top_role >= guild.me.top_role:
         return "That member's role is above the bot's, so it can't act on them."
     action["member_name"] = found.display_name
+    if action["kind"] == NICKNAME:
+        nickname = str(action.get("nickname") or "").strip()
+        if len(nickname) > 32:
+            return "A nickname can be at most 32 characters."
+        action["nickname"] = nickname
     if not str(action.get("reason") or "").strip():
         return "Say why: members vote on the reason."
     return None
@@ -718,6 +727,11 @@ def describe(action):
                        "They can come back with a new invite."),
         BAN: lambda: (f"Ban {a['member_name']}", f"Ban <@{a['member']}> from the server."),
         UNBAN: lambda: (f"Unban {a['member_name']}", f"Lift the ban on {a['member_name']}."),
+        NICKNAME: lambda: ((f"Rename {a['member_name']} to {a['nickname']}"
+                            if a.get("nickname") else f"Reset {a['member_name']}'s nickname"),
+                           (f"Change <@{a['member']}>'s nickname to **{a['nickname']}**."
+                            if a.get("nickname") else
+                            f"Reset <@{a['member']}>'s nickname.")),
         PICKER_CREATE: lambda: (f"Add a picker: {a['title']}", _picker_details(a)),
         PICKER_EDIT: lambda: (f"Change the picker {a['picker']}", _picker_details(a)),
         PICKER_DELETE: lambda: (f"Remove the picker {a['picker']}",
@@ -1027,6 +1041,10 @@ async def _carry_out_member(guild, a):
         await guild.unban(discord.Object(target), reason=REASON)
         return f"Done: {a['member_name']} is unbanned."
     member = await guild.fetch_member(target)
+    if a["kind"] == NICKNAME:
+        await member.edit(nick=a["nickname"] or None, reason=REASON)
+        return (f"Done: {a['member_name']}'s nickname is now {a['nickname']}."
+                if a["nickname"] else f"Done: {a['member_name']}'s nickname is reset.")
     try:
         who = "An admin of" if a.get("by_admin") else "A community vote in"
         await member.send(f"{who} {guild.name} decided to "

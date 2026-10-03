@@ -193,6 +193,11 @@ class Tiers(unittest.TestCase):
         member_tool = next(t for t in assistant.TOOLS if t["name"] == "draft_member_action")
         self.assertIn("reason", member_tool["parameters"]["required"])
 
+    def test_renaming_a_member_is_a_draft_that_needs_a_mention_a_name_and_a_reason(self):
+        tool = next(t for t in assistant.TOOLS if t["name"] == "draft_rename_member")
+        self.assertEqual(assistant.TIER["draft_rename_member"], assistant.DRAFT)
+        self.assertEqual(set(tool["parameters"]["required"]), {"member", "nickname", "reason"})
+
 
 def tool_result(converse):
     """The first tool result the model was shown."""
@@ -339,6 +344,25 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
             reply("That isn't a sound."), attachments=[picture])
         self.assertEqual(ctx.drafts, [])
         self.assertIn("sound file", tool_result(calls)["error"])
+
+    async def test_asking_to_rename_a_member_drafts_a_proposal(self):
+        def role(position):
+            r = mock.Mock(spec=discord.Role)
+            r.position = position
+            r.__ge__ = lambda self, other: self.position >= other.position
+            return r
+        self.guild.owner_id = 1
+        self.guild.me = fake(discord.Member, 2, "Saheb l Server", top_role=role(50))
+        self.guild.fetch_member = mock.AsyncMock(
+            return_value=fake(discord.Member, 8, "Karim", display_name="Karim",
+                              top_role=role(1)))
+        ctx, answer, calls = await self.talk(
+            reply(calls=[("draft_rename_member", {"member": "<@8>", "nickname": "Abou Tony",
+                                                  "reason": "He asked"})]),
+            reply("Drafted it; press the button to file it."))
+        self.assertEqual([d["title"] for d in ctx.drafts], ["Rename Karim to Abou Tony"])
+        self.assertEqual(proposals.all_proposals(), [])
+        self.assertIn("button", tool_result(calls)["note"])
 
     async def test_only_a_member_boosting_the_server_asks_for_a_role(self):
         ctx, _, calls = await self.talk(

@@ -191,7 +191,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
 | AutoMod | add or remove watch words; blocked words stay |
 | Events | cancel someone else's event |
-| Members | kick, ban, unban |
+| Members | kick, ban, unban, change or reset a nickname |
 | Settings | any of the settings, within its range |
 | Anything else | a general proposal, written as code by the self-update workflow |
 
@@ -520,7 +520,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 37 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 38 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |
