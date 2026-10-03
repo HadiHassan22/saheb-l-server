@@ -251,8 +251,9 @@ class Sounds(WithTempData):
 class People(WithTempData):
     def people_guild(self, target_position=1):
         g = guild()
-        member = types.SimpleNamespace(id=MEMBER, display_name="Tony",
-                                       top_role=role(3, "x", position=target_position))
+        member = mock.create_autospec(discord.Member, instance=True)
+        member.id, member.display_name = MEMBER, "Tony"
+        member.top_role = role(3, "x", position=target_position)
         g.fetch_member = mock.AsyncMock(return_value=member)
         return g
 
@@ -281,6 +282,52 @@ class People(WithTempData):
         votes = cards.card(proposals.get(p["no"])).fields[2].value
         self.assertIn("1 voted so far", votes)
         self.assertNotIn("1 yes", votes)
+
+    async def test_a_nickname_change_is_checked_like_the_other_member_actions(self):
+        g = self.people_guild()
+        self.assertIn("Mention", await actions.check(
+            g, {"kind": actions.NICKNAME, "member": "Tony", "nickname": "x", "reason": "y"}))
+        self.assertIn("Say why", await actions.check(
+            g, {"kind": actions.NICKNAME, "member": f"<@{MEMBER}>", "nickname": "x"}))
+        self.assertIn("32 characters", await actions.check(
+            g, {"kind": actions.NICKNAME, "member": f"<@{MEMBER}>", "nickname": "x" * 33,
+                "reason": "y"}))
+        self.assertIn("owner's nickname", await actions.check(
+            g, {"kind": actions.NICKNAME, "member": str(OWNER), "nickname": "x",
+                "reason": "y"}))
+        action = {"kind": actions.NICKNAME, "member": f"<@{MEMBER}>",
+                  "nickname": " Abou Tony ", "reason": "He asked"}
+        self.assertIsNone(await actions.check(g, action))
+        self.assertEqual((action["member"], action["nickname"], action["member_name"]),
+                         (str(MEMBER), "Abou Tony", "Tony"))
+
+    async def test_a_rename_sets_the_nickname_and_an_empty_one_resets_it(self):
+        g = self.people_guild()
+        member = g.fetch_member.return_value
+        said = await actions.carry_out(g, {"kind": actions.NICKNAME, "member": f"<@{MEMBER}>",
+                                           "nickname": " Abou Tony ", "reason": "He asked"})
+        member.edit.assert_awaited_once_with(nick="Abou Tony", reason=actions.REASON)
+        self.assertIn("Tony's nickname is now Abou Tony", said)
+        said = await actions.carry_out(g, {"kind": actions.NICKNAME, "member": f"<@{MEMBER}>",
+                                           "nickname": "", "reason": "Back to normal"})
+        self.assertEqual(member.edit.call_args.kwargs, {"nick": None, "reason": actions.REASON})
+        self.assertIn("Tony's nickname is reset", said)
+
+    def test_a_rename_is_an_ordinary_vote_and_says_what_the_nickname_will_be(self):
+        action = {"kind": actions.NICKNAME, "member": str(MEMBER), "member_name": "Tony",
+                  "nickname": "Abou Tony", "reason": "He asked"}
+        p = actions.KIND.open(8, dict(action), NOW)
+        self.assertEqual(p["excluded"], [])
+        self.assertFalse(p.get("blind", False))
+        title, details = actions.describe(action)
+        self.assertEqual(title, "Rename Tony to Abou Tony")
+        self.assertIn(f"<@{MEMBER}>'s nickname to **Abou Tony**", details)
+        self.assertIn("He asked", details)
+        title, details = actions.describe({**action, "nickname": ""})
+        self.assertEqual(title, "Reset Tony's nickname")
+        self.assertIn(f"Reset <@{MEMBER}>'s nickname.", details)
+        self.assertLessEqual(len("Proposal 99: " + title), 256)  # a card's title
+        self.assertLessEqual(len(details), 4000)                 # one embed
 
 
 class Quick(WithTempData):
