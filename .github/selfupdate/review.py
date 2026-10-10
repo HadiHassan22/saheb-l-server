@@ -67,7 +67,7 @@ async def review(proposal, diff):
         return False, [f"The change is too large to review ({len(diff)} characters)."]
     client = providers.OpenRouter(os.environ["OPENROUTER_API_KEY"])
     answer, _, _, _ = await client.json_answer(
-        os.environ.get("REVIEWER_MODEL") or "anthropic/claude-haiku-4.5",
+        os.environ.get("REVIEWER_MODEL") or "anthropic/claude-haiku-5.5",
         prompt(proposal, diff), SCHEMA, max_tokens=4000)
     problems = [str(p) for p in answer.get("problems") or []]
     approved = bool(answer.get("approve")) and not problems

@@ -10,6 +10,7 @@ import contextlib
 import copy
 import importlib.util
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -305,6 +306,67 @@ class Runs(unittest.TestCase):
         self.assertIn("failed (run 2", news[0])
 
 
+class AdminDetails(unittest.TestCase):
+    """What happened in a try goes to #admin-log, never to members."""
+
+    BODY = ("Proposal 3. It passed a vote in the server.\n\nAdded trivia.\n\n"
+            f"**Why it wasn't merged**\n- The tests fail.\n\n{updates.ADMINS}\n"
+            "**What happened**: anthropic/claude-haiku-5.5, 2 writing runs\n"
+            "- Tests: 1 of 3 tests fail: `test_y.Z.test_x`.")
+
+    def test_members_never_get_what_is_for_the_admins(self):
+        summary = updates.summary_of({"body": self.BODY})
+        self.assertEqual(summary, "Added trivia.\n\n**Why it wasn't merged**\n- The tests fail.")
+        self.assertTrue(updates.details_of({"body": self.BODY}).startswith("**What happened**"))
+        self.assertEqual(updates.details_of({"body": "Proposal 3. Old.\n\nDid it."}), "")
+        self.assertEqual(updates.details_of({"body": None}), "")
+
+    def test_details_fit_discord_and_keep_code_blocks_whole(self):
+        text = "**What happened**\n" + "- a step\n" * 40 + "```\n" + "boom\n" * 2000 + "```"
+        pieces = updates.pieces(text)
+        self.assertLessEqual(len(pieces), 3)
+        for piece in pieces:
+            self.assertLessEqual(len(piece), 2000)
+            self.assertEqual(piece.count("```") % 2, 0, piece[-200:])
+        self.assertIn("cut short", pieces[-1])
+        self.assertEqual(updates.pieces("one line"), ["one line"])
+        self.assertEqual(updates.pieces(""), [])
+
+
+class FailedRuns(unittest.IsolatedAsyncioTestCase):
+    async def test_admins_are_told_why_a_run_failed(self):
+        answers = {
+            "actions/runs/7/jobs": {"jobs": [{"id": 70, "steps": [
+                {"name": "Set up job", "conclusion": "success"},
+                {"name": "Run python .github/selfupdate/run.py", "conclusion": "failure"}]}]},
+            "check-runs/70/annotations": [
+                {"annotation_level": "failure",
+                 "message": "OpenRouter refused the key (HTTP 401). Nothing was recorded."},
+                {"annotation_level": "failure", "message": "Process completed with exit code 1."},
+                {"annotation_level": "warning", "message": "Node.js 20 is deprecated."}],
+        }
+        with mock.patch.object(updates.workflow, "get",
+                               mock.AsyncMock(side_effect=lambda path: answers[path])):
+            why = await updates.failure_of(run(7, conclusion="failure"))
+        self.assertEqual(why, "the step “Run python .github/selfupdate/run.py” failed; "
+                              "OpenRouter refused the key (HTTP 401). Nothing was recorded.")
+        with mock.patch.object(updates.workflow, "get", mock.AsyncMock(
+                side_effect=updates.workflow.Refused("no"))), \
+                self.assertLogs("updates", "WARNING"):
+            self.assertEqual(await updates.failure_of(run(7, conclusion="failure")), "")
+
+    def test_the_reason_goes_with_the_first_failure_only(self):
+        seen = {}
+        self.assertEqual(updates.failed_unseen([run(2, conclusion="failure")], seen), [])
+        updates.run_news([run(1)], seen)
+        runs = [run(2, conclusion="failure"), run(1)]
+        self.assertEqual([r["id"] for r in updates.failed_unseen(runs, seen)], [2])
+        news = updates.run_news(runs, seen, {2: "the key was refused"})
+        self.assertEqual(news, ["The self-update workflow failed (run 2: "
+                                "<https://github.com/o/r/actions/runs/2>): the key was refused"])
+        self.assertEqual(updates.failed_unseen([run(3, conclusion="failure")] + runs, seen), [])
+
+
 class Starting(WithTempData):
     def setUp(self):
         super().setUp()
@@ -459,66 +521,293 @@ selfupdate_run = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(selfupdate_run)
 
 
-class Writer(unittest.TestCase):
-    """A Claude Code run that fails is a failed try, never "no change"."""
+INIT = {"type": "system", "subtype": "init", "session_id": "s-1"}
 
-    def written(self, returncode, stdout, stderr="", **env):
-        done = subprocess.CompletedProcess([], returncode, stdout, stderr)
-        with mock.patch.object(selfupdate_run.subprocess, "run", return_value=done) as ran, \
+
+def said(text, *edits):
+    content = [{"type": "text", "text": text}] + [
+        {"type": "tool_use", "name": "Edit",
+         "input": {"file_path": str(selfupdate_run.ROOT / path)}} for path in edits]
+    return {"type": "assistant", "message": {"content": content}}
+
+
+def result(subtype="success", is_error=False, text="Done.", turns=12, cost=0.42):
+    return {"type": "result", "subtype": subtype, "is_error": is_error, "result": text,
+            "num_turns": turns, "total_cost_usd": cost, "session_id": "s-1"}
+
+
+def writing(*events, timed_out=False, returncode=0):
+    return selfupdate_run.Writing("Writing the change", events, 600, timed_out, returncode)
+
+
+class Writer(unittest.TestCase):
+    """How Claude Code is run, and what is read from what it printed."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp)
+        patched = mock.patch.multiple(selfupdate_run, TEMP=self.tmp,
+                                      TRANSCRIPT=self.tmp / "transcript.jsonl")
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def written(self, *events, returncode=0, hangs=False, **env):
+        calls = []
+
+        class Process:
+            def __init__(self, args, stdout, **kwargs):
+                calls.append((args, kwargs))
+                stdout.write("".join(json.dumps(e) + "\n" for e in events))
+                self.returncode = returncode
+
+            def wait(self, timeout=None):
+                if hangs and timeout is not None:
+                    raise subprocess.TimeoutExpired("claude", timeout)
+                return self.returncode
+
+            def kill(self):
+                self.returncode = -9
+        with mock.patch.object(selfupdate_run.subprocess, "Popen", Process), \
                 mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key", **env}), \
                 contextlib.redirect_stdout(io.StringIO()):
-            selfupdate_run.claude("Do it.")
-        return ran.call_args
+            done = selfupdate_run.claude("Do it.", "Writing the change", 600,
+                                          selfupdate_run.SPEND)
+        return done, calls[0]
 
-    def test_it_writes_with_the_chosen_openrouter_model(self):
+    def test_a_claude_model_goes_by_the_name_claude_code_knows(self):
         with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-real"}):
-            call = self.written(0, "Done.", CODER_MODEL="z-ai/glm-5.3")
-        args, env = call.args[0], call.kwargs["env"]
-        self.assertEqual(args[args.index("--model") + 1], "z-ai/glm-5.3")
+            _, (args, kwargs) = self.written(INIT, result(), CODER_MODEL="")
+        env = kwargs["env"]
+        self.assertEqual(args[args.index("--model") + 1], "claude-haiku-5-5")
+        self.assertEqual(json.loads(args[args.index("--settings") + 1]),
+                         {"modelOverrides": {"claude-haiku-5-5": "anthropic/claude-haiku-5.5"}})
+        self.assertEqual(args[args.index("--effort") + 1], "high")
+        self.assertEqual(args[args.index("--output-format") + 1], "stream-json")
+        self.assertEqual(args[args.index("--max-turns") + 1], str(selfupdate_run.MAX_TURNS))
+        self.assertEqual(args[args.index("--max-budget-usd") + 1], "2.00")
         self.assertEqual(env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api")
         self.assertEqual(env["ANTHROPIC_AUTH_TOKEN"], "or-key")
         self.assertEqual(env["ANTHROPIC_API_KEY"], "")  # else it would win
-        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "z-ai/glm-5.3")
+        self.assertEqual(env["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "claude-haiku-5-5")
         self.assertNotIn("GH_TOKEN", env)
-        call = self.written(0, "Done.", CODER_MODEL="")
-        args = call.args[0]
-        self.assertEqual(args[args.index("--model") + 1], selfupdate_run.CODER)
+        self.assertIs(kwargs["stdin"], subprocess.DEVNULL)
 
-    def test_out_of_credit_is_a_failure(self):
+    def test_another_model_goes_by_its_openrouter_name(self):
+        _, (args, kwargs) = self.written(INIT, result(), CODER_MODEL="z-ai/glm-5.3")
+        self.assertEqual(args[args.index("--model") + 1], "z-ai/glm-5.3")
+        self.assertNotIn("--settings", args)
+        self.assertEqual(kwargs["env"]["ANTHROPIC_DEFAULT_HAIKU_MODEL"], "z-ai/glm-5.3")
+        self.assertEqual(selfupdate_run.claude_code_model("anthropic/claude-opus-4.8")[0],
+                         "claude-opus-4-8")
+        self.assertEqual(selfupdate_run.claude_code_model("~anthropic/claude-sonnet-latest"),
+                         ("~anthropic/claude-sonnet-latest", {}))
+
+    def test_a_finished_run_says_what_it_did(self):
+        done, _ = self.written(INIT, said("Reading.", "actions.py"),
+                               said("Changed it, key sk-or-v1-abcdefghijklmnop.",
+                                    "test_powers.py", "actions.py"), result())
+        self.assertTrue(done.finished)
+        self.assertEqual((done.session, done.turns, done.cost), ("s-1", 12, 0.42))
+        self.assertEqual(done.edited, ["actions.py", "test_powers.py"])
+        line = done.line()
+        self.assertIn("Writing the change: finished (12 turns", line)
+        self.assertIn("`actions.py`, `test_powers.py`", line)
+        self.assertIn("Its last words: “Changed it", line)
+        transcript = (self.tmp / "transcript.jsonl").read_text()
+        self.assertIn("Changed it", transcript)
+        self.assertNotIn("sk-or-v1-abcdefghijklmnop", transcript)
+
+    def test_a_run_that_runs_out_of_time_is_stopped_and_still_read(self):
+        done, _ = self.written(INIT, said("Halfway.", "actions.py"), hangs=True)
+        self.assertTrue(done.timed_out)
+        self.assertFalse(done.finished)
+        self.assertEqual(done.edited, ["actions.py"])
+        self.assertIn("was stopped at its time limit", done.ending())
+
+    def test_how_a_run_that_didnt_finish_ended(self):
+        endings = {
+            "stopped at the limit of": writing(INIT, result("error_max_turns", True, "")),
+            "stopped at its spending limit": writing(
+                INIT, result("error_max_budget_usd", True, "")),
+            "was refused by the model": writing(INIT, result(is_error=True, text=(
+                "API Error: xiaomi/mimo-v2.6-pro can't help with this. Start a new session "
+                "to continue.\nRequest ID: gen-1"))),
+            "ended without saying why (exit code 2)": writing(returncode=2),
+        }
+        for ending, done in endings.items():
+            self.assertFalse(done.finished)
+            self.assertIn(ending, done.ending())
+            self.assertFalse(done.dead_key())
+
+    def test_a_dead_key_is_not_the_proposals_fault(self):
+        retry = {"type": "system", "subtype": "api_retry", "error_status": 401}
+        self.assertTrue(writing(INIT, retry, retry, result(is_error=True, text=(
+            "Failed to authenticate. API Error: 401 User not found."))).dead_key())
+        self.assertTrue(writing(INIT, result(is_error=True, text="Insufficient credits"))
+                        .dead_key())
+        self.assertFalse(writing(INIT, result()).dead_key())
+        # What the model says is about the proposal, not about the run.
+        self.assertFalse(writing(INIT, said("I'll handle the 401 error case."),
+                                 timed_out=True).dead_key())
+
+
+class Attempting(unittest.TestCase):
+    """Writing and checking one try: limits, partial work and fixes."""
+
+    def attempt(self, writings, changed, tests=((True, "Ran 3 tests"),), shipped=True,
+                summary="Did it.", review=(True, [])):
+        story = selfupdate_run.Story()
+        claude = mock.Mock(side_effect=list(writings))
+        reviewed = mock.AsyncMock(return_value=review)
+        with mock.patch.object(selfupdate_run, "run", return_value=mock.Mock(stdout="+x")), \
+                mock.patch.object(selfupdate_run, "copy_discord"), \
+                mock.patch.object(selfupdate_run, "claude", claude), \
+                mock.patch.object(selfupdate_run, "take_summary", return_value=summary), \
+                mock.patch.object(selfupdate_run, "changed", side_effect=list(changed)), \
+                mock.patch.object(selfupdate_run, "tests", side_effect=list(tests)), \
+                mock.patch.object(selfupdate_run.protected, "check", return_value=[]), \
+                mock.patch.object(selfupdate_run.protected, "contains_secret",
+                                  return_value=False), \
+                mock.patch.dict("sys.modules", {"review": types.SimpleNamespace(
+                    review=reviewed)}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            outcome = selfupdate_run.attempt({"no": 5, "title": "T", "details": "D",
+                                              "shipped": shipped}, "proposal-5", story)
+        return outcome, story, claude, reviewed
+
+    def test_an_admins_change_skips_the_review_and_a_votes_does_not(self):
+        outcome, story, _, reviewed = self.attempt([writing(INIT, result())], [True])
+        self.assertEqual(outcome, ("merged", "Did it."))
+        reviewed.assert_not_awaited()
+        self.assertIn("Security review: skipped, an admin approved it.", story.text())
+        outcome, story, _, reviewed = self.attempt([writing(INIT, result())], [True],
+                                                   shipped=False)
+        self.assertEqual(outcome, ("merged", "Did it."))
+        reviewed.assert_awaited_once()
+        self.assertIn("Security review: approved.", story.text())
+
+    def test_what_was_written_before_a_limit_is_still_checked(self):
+        stopped = writing(INIT, said("Halfway.", "actions.py"), timed_out=True)
+        outcome, story, _, _ = self.attempt([stopped], [True])
+        self.assertEqual(outcome, ("merged", "Did it."))
+        self.assertIn("didn't finish", story.text())
+
+    def test_stopping_before_changing_anything_is_a_failure(self):
+        stopped = writing(INIT, result("error_max_turns", True, ""))
         with self.assertRaises(selfupdate_run.WriterFailed) as caught:
-            self.written(1, "Credit balance is too low\n")
-        self.assertEqual(str(caught.exception), "Credit balance is too low")
-        with self.assertRaises(selfupdate_run.WriterFailed):
-            self.written(0, "Credit balance is too low")
+            self.attempt([stopped], [False])
+        self.assertIn("limit of", str(caught.exception))
         with self.assertRaises(selfupdate_run.WriterFailed) as caught:
-            self.written(2, "")
-        self.assertIn("code 2", str(caught.exception))
+            self.attempt([writing(INIT, result())], [False], summary="")
+        self.assertIn("didn't say why", str(caught.exception))
+        outcome, _, _, _ = self.attempt([writing(INIT, result())], [False])
+        self.assertEqual(outcome, ("no-change", "Did it."))
 
-    def test_an_answer_is_not_a_failure(self):
-        self.written(0, "I added the rank-up command and its tests.")
-        self.written(0, "The proposal is about an API Error message; I changed nothing.")
+    def test_a_fix_continues_the_same_session_and_the_admins_see_the_failure(self):
+        failing = ("FAIL: test_x (test_y.Z.test_x)\nAssertionError: 1 != 2\n\n"
+                   "Ran 3 tests in 0.1s\n\nFAILED (failures=1)")
+        outcome, story, claude, _ = self.attempt(
+            [writing(INIT, result()), writing(INIT, result())], [True],
+            tests=[(False, failing), (True, "Ran 3 tests in 0.1s\n\nOK")])
+        self.assertEqual(outcome, ("merged", "Did it."))
+        fix = claude.call_args_list[1].args
+        self.assertTrue(fix[0].startswith("The tests failed after your change."))
+        self.assertEqual((fix[1], fix[4]), ("Fixing the failing tests", "s-1"))
+        text = story.text()
+        self.assertIn("Tests: 1 of 3 tests fail: `test_y.Z.test_x`.", text)
+        self.assertIn("Tests: all 3 tests pass.", text)
+        self.assertIn("AssertionError: 1 != 2", text)
 
-    def test_it_is_recorded_as_failed_with_the_reason(self):
+    def test_a_fix_without_a_session_is_told_the_proposal_again(self):
+        _, _, claude, _ = self.attempt(
+            [writing(said("Done.", "a.py")), writing(INIT, result())], [True],
+            tests=[(False, "boom"), (True, "Ran 3 tests")])
+        self.assertTrue(claude.call_args_list[1].args[0].startswith("You are carrying out"))
+        self.assertIsNone(claude.call_args_list[1].args[4])
+
+    def test_failing_tests_are_said_plainly_for_members(self):
+        outcome, _, _, _ = self.attempt(
+            [writing(INIT, result())] * 4, [True, True],
+            tests=[(False, "Traceback\nboom")] * 4)
+        self.assertEqual(outcome[0], "failed")
+        self.assertIn("- The tests fail.", outcome[1])
+        self.assertNotIn("Traceback", outcome[1])
+
+    def test_a_dead_key_while_writing_isnt_the_proposals_try(self):
+        dead = writing(INIT, result(is_error=True, text="Failed to authenticate. 401"))
+        with self.assertRaises(selfupdate_run.Unavailable):
+            self.attempt([dead], [False])
+
+
+class Preflight(unittest.TestCase):
+    def checked(self, answer):
+        def urlopen(request, timeout):
+            self.assertEqual(request.full_url, "https://openrouter.ai/api/v1/key")
+            self.assertEqual(request.get_header("Authorization"), "Bearer or-key")
+            if isinstance(answer, Exception):
+                raise answer
+            return io.BytesIO(json.dumps(answer).encode())
+        with mock.patch.object(selfupdate_run.urllib.request, "urlopen", urlopen), \
+                mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key"}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            selfupdate_run.preflight()
+
+    def test_a_refused_key_or_no_credit_stops_the_run(self):
+        with self.assertRaises(selfupdate_run.Unavailable):
+            self.checked(selfupdate_run.urllib.error.HTTPError("u", 401, "no", {}, None))
+        with self.assertRaises(selfupdate_run.Unavailable):
+            self.checked({"data": {"limit_remaining": 0.1}})
+
+    def test_anything_less_clear_lets_the_run_go_on(self):
+        self.checked({"data": {"limit_remaining": None}})
+        self.checked({"data": {"limit_remaining": 40}})
+        self.checked(selfupdate_run.urllib.error.HTTPError("u", 500, "down", {}, None))
+        self.checked(selfupdate_run.urllib.error.URLError("no network"))
+
+
+class Running(unittest.TestCase):
+    def main(self, preflight=None, attempt=None):
         recorded = {}
         with mock.patch.object(selfupdate_run, "next_proposal",
                                return_value={"no": 27, "title": "Ranks"}), \
+                mock.patch.object(selfupdate_run, "preflight", side_effect=preflight), \
                 mock.patch.object(selfupdate_run, "run"), \
-                mock.patch.object(selfupdate_run, "attempt", side_effect=
-                                  selfupdate_run.WriterFailed("Credit balance is too low")), \
-                mock.patch.object(selfupdate_run, "record", side_effect=lambda p, b, o, body:
-                                  recorded.update(outcome=o, body=body)), \
-                contextlib.redirect_stdout(io.StringIO()):
-            selfupdate_run.main()
+                mock.patch.object(selfupdate_run, "attempt", side_effect=attempt), \
+                mock.patch.object(selfupdate_run, "record", side_effect=lambda p, b, o, body, d:
+                                  recorded.update(outcome=o, body=body, details=d)), \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            try:
+                selfupdate_run.main()
+            except SystemExit as e:
+                recorded["exit"] = e.code
+        return recorded, printed.getvalue()
+
+    def test_a_writer_that_fails_is_recorded_as_failed_with_the_reason(self):
+        recorded, _ = self.main(attempt=selfupdate_run.WriterFailed(
+            "it was refused by the model, before changing anything"))
         self.assertEqual(recorded["outcome"], "failed")
-        self.assertIn("Credit balance is too low", recorded["body"])
+        self.assertIn("refused by the model", recorded["body"])
         self.assertIn("/admin retry", recorded["body"])
+
+    def test_a_dead_key_records_nothing_and_fails_the_run_with_why(self):
+        for where in ({"preflight": selfupdate_run.Unavailable("OpenRouter refused the key")},
+                      {"attempt": selfupdate_run.Unavailable("OpenRouter refused the key")}):
+            recorded, printed = self.main(**where)
+            self.assertEqual(recorded, {"exit": 1})
+            self.assertIn("::error title=Self-update couldn't write::OpenRouter refused", printed)
+
+    def test_a_broken_run_tells_the_admins_what_broke(self):
+        recorded, _ = self.main(attempt=ValueError("bad JSON"))
+        self.assertEqual(recorded["outcome"], "failed")
+        self.assertNotIn("bad JSON", recorded["body"])
+        self.assertIn("The run broke: ValueError: bad JSON", recorded["details"])
 
 
 class Recording(unittest.TestCase):
     """A change that can't be merged is closed as failed, so an admin can
     retry it, and every run writes on main as it is when the run starts."""
 
-    def recorded(self, merge_fails):
+    def recorded(self, merge_fails, outcome="merged", details=""):
         calls = []
 
         def gh(*args):
@@ -533,7 +822,7 @@ class Recording(unittest.TestCase):
                 mock.patch.object(selfupdate_run, "run"), \
                 contextlib.redirect_stdout(io.StringIO()):
             sha = selfupdate_run.record({"no": 64, "title": "Greeting", "shipped": True},
-                                        "proposal-64", "merged", "Moved it.")
+                                        "proposal-64", outcome, "Moved it.", details)
         return sha, calls
 
     def test_a_merge_that_fails_is_closed_as_failed(self):
@@ -557,39 +846,36 @@ class Recording(unittest.TestCase):
         self.assertEqual(sha, "abc1234")
         self.assertFalse(any(c[:2] in (("pr", "edit"), ("pr", "close")) for c in calls))
 
+    def test_what_happened_is_kept_for_the_admins_after_the_marker(self):
+        _, calls = self.recorded(merge_fails=False, outcome="failed",
+                                 details="- Tests: fail. Key sk-or-v1-abcdefghijklmnop")
+        create = next(c for c in calls if c[:2] == ("pr", "create"))
+        body = create[create.index("--body") + 1]
+        self.assertIn(f"Moved it.\n\n{selfupdate_run.ADMINS}\n- Tests: fail.", body)
+        self.assertNotIn("sk-or-v1-abcdefghijklmnop", body)
+        self.assertEqual(updates.summary_of({"body": body}), "Moved it.")
+        self.assertTrue(updates.details_of({"body": body}).startswith("- Tests: fail."))
+        self.assertEqual(selfupdate_run.ADMINS, updates.ADMINS)
+
+    def test_a_merge_that_fails_tells_members_and_the_admins_why(self):
+        _, calls = self.recorded(merge_fails=True, details="- Tests: all pass.")
+        edit = next(c for c in calls if c[:2] == ("pr", "edit"))
+        body = edit[edit.index("--body") + 1]
+        self.assertIn("couldn't be merged", updates.summary_of({"body": body}))
+        self.assertIn("Merging: GitHub refused: not mergeable", updates.details_of({"body": body}))
+
     def test_the_workflow_checks_out_main_as_it_is_now(self):
         workflow = (HERE / ".github" / "workflows" / "self-update.yml").read_text()
         self.assertIn("ref: main", workflow)
 
+    def test_the_transcript_is_kept_even_when_the_run_fails(self):
+        workflow = (HERE / ".github" / "workflows" / "self-update.yml").read_text()
+        upload = workflow[workflow.index("actions/upload-artifact"):]
+        self.assertIn("if: always()", upload)
+        self.assertIn("transcript.jsonl", upload)
+
 
 class Reviewing(unittest.TestCase):
-    """Only a change members voted for is reviewed."""
-
-    def attempt(self, shipped):
-        reviewed = mock.AsyncMock(return_value=(True, []))
-        with mock.patch.object(selfupdate_run, "run", return_value=mock.Mock(stdout="+x")), \
-                mock.patch.object(selfupdate_run, "copy_discord"), \
-                mock.patch.object(selfupdate_run, "claude"), \
-                mock.patch.object(selfupdate_run, "take_summary", return_value="Did it."), \
-                mock.patch.object(selfupdate_run, "changed", return_value=True), \
-                mock.patch.object(selfupdate_run, "tests", return_value=(True, "")), \
-                mock.patch.object(selfupdate_run.protected, "check", return_value=[]), \
-                mock.patch.object(selfupdate_run.protected, "contains_secret",
-                                  return_value=False), \
-                mock.patch.dict("sys.modules", {"review": types.SimpleNamespace(
-                    review=reviewed)}):
-            outcome = selfupdate_run.attempt({"no": 5, "title": "T", "details": "D",
-                                              "shipped": shipped}, "proposal-5")
-        return outcome, reviewed
-
-    def test_an_admins_change_skips_the_review_and_a_votes_does_not(self):
-        outcome, reviewed = self.attempt(shipped=True)
-        self.assertEqual(outcome, ("merged", "Did it."))
-        reviewed.assert_not_awaited()
-        outcome, reviewed = self.attempt(shipped=False)
-        self.assertEqual(outcome, ("merged", "Did it."))
-        reviewed.assert_awaited_once()
-
     def test_the_review_goes_through_openrouter(self):
         sys.path.insert(0, str(HERE / ".github" / "selfupdate"))
         try:
@@ -601,7 +887,7 @@ class Reviewing(unittest.TestCase):
                 mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "or-key",
                                              "REVIEWER_MODEL": ""}):
             self.assertEqual(asyncio.run(review.review("Proposal", "+x")), (True, []))
-        self.assertEqual(answer.call_args.args[0], "anthropic/claude-haiku-4.5")
+        self.assertEqual(answer.call_args.args[0], "anthropic/claude-haiku-5.5")
 
 
 class Retry(WithTempData):

@@ -28,8 +28,12 @@ going: the workflow does one proposal per run, and GitHub's own timer for
 it can go an hour without running.
 
 The admins get more, in #admin-log (admins.py), which only they and the
-owner can read: each stage with its pull request, every start of the
-workflow, and the runs that fail, with links.
+owner can read: each stage with its pull request and what happened, step
+by step (how each writing run ended, what each check found, the failing
+tests, and where the full transcript is), every start of the workflow,
+and the runs that fail, with the reason GitHub noted. The workflow writes
+what happened after a marker in the pull request (ADMINS); members only
+ever get what comes before it.
 
 Members get the status and the summary written for them, never a link:
 the repository is under the owner's own GitHub account, and linking it
@@ -92,15 +96,46 @@ def stage_of(pr):
 
 
 LINK = re.compile(r"<?https?://\S+>?")
+# What the workflow writes after this in a pull request is for the admins
+# only (run.ADMINS in .github/selfupdate, which must match).
+ADMINS = "<!-- admins -->"
 
 
 def summary_of(pr):
     """What the workflow wrote for members, without the line saying how the
-    proposal was approved and without any link."""
-    body = (pr or {}).get("body") or ""
+    proposal was approved, what is for the admins, and any link."""
+    body = ((pr or {}).get("body") or "").split(ADMINS, 1)[0]
     kept = body.split("\n\n", 1)[1] if body.startswith("Proposal ") and "\n\n" in body else body
     kept = LINK.sub("", kept).strip()
     return kept[:1500] + ("…" if len(kept) > 1500 else "")
+
+
+def details_of(pr):
+    """What the workflow wrote for the admins about how the try went, or
+    "" for a pull request from before it did."""
+    body = (pr or {}).get("body") or ""
+    return body.split(ADMINS, 1)[1].strip() if ADMINS in body else ""
+
+
+def pieces(text, size=1900, most=3):
+    """`text` cut at line ends into at most `most` messages Discord takes,
+    with a code block cut in two closed and opened again."""
+    out, piece, fenced = [], "", False
+    for line in text.splitlines():
+        line = line[:size - 10]
+        if piece and len(piece) + len(line) + 5 > size:
+            out.append(piece.rstrip("\n") + ("\n```" if fenced else ""))
+            piece = "```\n" if fenced else ""
+        piece += line + "\n"
+        if line.startswith("```"):
+            fenced = not fenced
+    if piece.strip():
+        out.append(piece.rstrip("\n") + ("\n```" if fenced else ""))
+    if len(out) > most:
+        out, last = out[:most], out[most - 1][:size - 60]
+        out[-1] = (last + ("\n```" if last.count("```") % 2 else "")
+                   + "\n(cut short: the pull request has the rest)")
+    return out
 
 
 def message(no, stage, summary=""):
@@ -161,13 +196,15 @@ def waiting():
 FAILED_RUN = ("failure", "timed_out", "startup_failure")
 
 
-def run_news(runs, seen):
+def run_news(runs, seen, reasons=None):
     """What to tell the admins about the workflow's `runs`, newest first as
     GitHub lists them. `seen` records what was already said, and is
     updated. A run someone started (the bot, or an admin by hand) is
     announced when it starts; the timer's runs, which mostly find nothing
-    to do, aren't. A string of failed runs is announced once, and so is the
-    first success after it. The first time, nothing is announced."""
+    to do, aren't. A string of failed runs is announced once, with why the
+    first failed if `reasons` (by run id) says, and so is the first success
+    after it. The first time, nothing is announced."""
+    reasons = reasons or {}
     first = "done" not in seen
     seen.setdefault("done", [])
     seen.setdefault("started", [])
@@ -188,12 +225,42 @@ def run_news(runs, seen):
             continue
         if run["conclusion"] in FAILED_RUN and not seen["failing"]:
             seen["failing"] = True
-            news.append(f"The self-update workflow failed ({where})")
+            why = reasons.get(run["id"])
+            news.append(f"The self-update workflow failed ({where})"
+                        + (f": {why}" if why else ""))
         elif run["conclusion"] == "success" and seen["failing"]:
             seen["failing"] = False
             news.append(f"The self-update workflow works again ({where})")
     seen["done"], seen["started"] = seen["done"][-100:], seen["started"][-100:]
     return news
+
+
+async def failure_of(run):
+    """Why workflow run `run` failed, from the step that failed and the
+    errors GitHub noted on its jobs, or "" if GitHub can't say."""
+    said = []
+    try:
+        for job in (await workflow.get(f"actions/runs/{run['id']}/jobs"))["jobs"]:
+            step = next((s["name"] for s in job.get("steps") or []
+                         if s.get("conclusion") == "failure"), None)
+            if step:
+                said.append(f"the step “{step}” failed")
+            for note in await workflow.get(f"check-runs/{job['id']}/annotations"):
+                text = (note.get("message") or "").strip()
+                if (note.get("annotation_level") == "failure" and text
+                        and not text.startswith("Process completed with exit code")):
+                    said.append(text)
+    except (workflow.Refused, KeyError, TypeError) as e:
+        log.warning(f"couldn't read why run {run.get('id')} failed: {e!r}")
+    return "; ".join(said)[:600]
+
+
+def failed_unseen(runs, seen):
+    """The failed runs in `runs` that run_news will announce next."""
+    if "done" not in seen or seen.get("failing"):
+        return []
+    return [run for run in runs if run["status"] == "completed"
+            and run["conclusion"] in FAILED_RUN and run["id"] not in seen["done"]]
 
 
 _last = {"at": 0.0, "refused": None}
@@ -257,10 +324,14 @@ async def follow(client):
             if advance(no, stage, pr):
                 await _say(client, no, message(no, stage, summary_of(pr)))
                 await _tell_admins(guild, f"{message(no, stage)}\n<{pr['html_url']}>")
+                for piece in pieces(details_of(pr)):
+                    await _tell_admins(guild, piece)
         runs = (await workflow.get(f"actions/workflows/{workflow.WORKFLOW}/runs",
                                    {"per_page": "20"}))["workflow_runs"]
         saved = _saved()
-        for text in run_news(runs, saved.setdefault("runs", {})):
+        seen = saved.setdefault("runs", {})
+        reasons = {run["id"]: await failure_of(run) for run in failed_unseen(runs, seen)}
+        for text in run_news(runs, seen, reasons):
             await _tell_admins(guild, text)
         store.save("updates", saved)
         going = any(run["status"] != "completed" for run in runs)

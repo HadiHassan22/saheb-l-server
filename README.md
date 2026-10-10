@@ -469,19 +469,25 @@ it every ten minutes, when it gets round to it. Each run takes the oldest
 passed proposal that hasn't been handled:
 
 1. **Claude Code writes the change** on a branch named `proposal-N`,
-   with a model from OpenRouter (MiMo V2.6 Pro unless the `CODER_MODEL`
-   variable names another). It can read and edit files and nothing else:
-   no shell, no GitHub credentials. If Claude Code can't run, for example
-   because the OpenRouter credit ran out, the try is recorded as failed,
-   not as a change that needed no code. If the proposal needs no code, or can't be done
-   within the protected core, it changes nothing and says why.
+   with a model from OpenRouter (Claude Haiku 5.5 unless the
+   `CODER_MODEL` variable names another). It can read and edit files and
+   nothing else: no shell, no GitHub credentials. Writing has limits, an
+   hour and $2 a try and 100 turns a run, so the try always ends in time
+   to be checked; what it wrote before a limit stopped it is still checked. If
+   it stops, or the model refuses, before changing anything, the try is
+   recorded as failed, not as a change that needed no code. If OpenRouter
+   refuses the key or the credit has run out, nothing is recorded: the
+   run fails, the admins are told why, and the proposal waits. If the
+   proposal needs no code, or can't be done within the protected core, it
+   changes nothing and says why.
 2. **The tests run**, with no secrets available. If they fail, Claude
-   gets one chance to fix its change.
+   gets one chance to fix its change, in the same session, so it still
+   knows the proposal and what it changed.
 3. **The protected-core check** refuses any change to the files and
    values listed in [PROTECTED.md](PROTECTED.md), and any added line that
    reads environment variables or keys or runs code built at runtime.
 4. **A security review**, for a change members voted for, reads the
-   whole diff against the proposal (Claude Haiku 4.5 through OpenRouter,
+   whole diff against the proposal (Claude Haiku 5.5 through OpenRouter,
    unless the `REVIEWER_MODEL` variable names another) and rejects anything that could leak a secret, contact a new
    host, add a suspicious dependency, work around the protected core,
    break Discord's rules, or do something materially different from what
@@ -500,10 +506,15 @@ passed proposal that hasn't been handled:
 
 The bot follows each proposal through GitHub's API and replies under its
 card in `#proposals`: deploying, live, needs no change, failed, or rolled
-back. `#admin-log` gets the same with a link to the pull request, plus
-each time the bot starts the workflow (or couldn't), runs it started, and
-runs that fail. Only the admins and the owner can read it: the bot checks
-that before every post.
+back. `#admin-log` gets the same with a link to the pull request and what
+happened, step by step: how each writing run ended (finished, out of
+time, turns or money, refused, or broken) with its turns, time, cost,
+the files it edited and its last words; what the tests, the
+protected-core check and the review found; the failing test output; and
+where the full transcript is kept. It also gets each time the bot starts
+the workflow (or couldn't), runs it started, and runs that fail, with the
+reason GitHub noted. Members never see these details. Only the admins and
+the owner can read `#admin-log`: the bot checks that before every post.
 
 Each proposal is tried once. If that try failed, changed nothing or was
 rolled back, an admin can have it tried again with `/admin retry`: the new
