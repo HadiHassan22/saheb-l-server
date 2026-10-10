@@ -6,8 +6,8 @@
 #   - repository variable BOT_URL: the bot's public Railway address
 #   - repository secret OPENROUTER_API_KEY
 # And, to change the models (any OpenRouter model id):
-#   - repository variable CODER_MODEL (default xiaomi/mimo-v2.6-pro)
-#   - repository variable REVIEWER_MODEL (default anthropic/claude-haiku-4.5)
+#   - repository variable CODER_MODEL (default anthropic/claude-haiku-5.5)
+#   - repository variable REVIEWER_MODEL (default anthropic/claude-haiku-5.5)
 name: Self-update
 
 on:
@@ -55,3 +55,12 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           CODER_MODEL: ${{ vars.CODER_MODEL }}
           REVIEWER_MODEL: ${{ vars.REVIEWER_MODEL }}
+      # What Claude Code did, event by event, for the admins: the pull
+      # request links it. Secrets are withheld from it before it's written.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: transcript
+          path: ${{ runner.temp }}/transcript.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
