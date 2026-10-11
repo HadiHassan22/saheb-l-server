@@ -26,6 +26,8 @@ RESULTS = {
     proposals.NO_QUORUM: "Not enough votes",
     proposals.WITHDRAWN: "Withdrawn",
 }
+# The role mentioned when a vote opens, so members see it and can vote.
+PROPOSAL_ROLE_ID = 1558960826977616003
 
 
 def choices(p):
@@ -100,10 +102,15 @@ def result(p):
     return (said + outcome)[:2000]
 
 
-async def post(p, channel, view=discord.utils.MISSING):
+async def post(p, channel, view=discord.utils.MISSING, ping=False):
     """Post `p`'s card in `channel`, with a thread for discussing it, and
-    return the message."""
-    message = await channel.send(embed=card(p), view=view)
+    return the message. `ping` also mentions the Proposal role, for a vote
+    that has just opened."""
+    content = f"<@&{PROPOSAL_ROLE_ID}>" if ping else None
+    allowed = (discord.AllowedMentions(everyone=False, users=False,
+                                       roles=[discord.Object(id=PROPOSAL_ROLE_ID)])
+               if ping else None)
+    message = await channel.send(content, embed=card(p), view=view, allowed_mentions=allowed)
     proposals.attach_message(p["no"], channel.id, message.id)
     try:
         await message.create_thread(name=f"Proposal {p['no']}: {p['title']}"[:100])

@@ -68,6 +68,8 @@ one of the bot's settings with `/propose-setting`.
   pass.
 - Members who have been here for 7 days can vote. Everyone who joined in
   the server's first week can vote right away.
+- When a vote opens, the bot mentions the Proposal role, so members see it
+  and can vote.
 
 **Votes are carried out automatically.** A passed change to the server,
 like a new channel, is made by the bot at once. Anything else is written

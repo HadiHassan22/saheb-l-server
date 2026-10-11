@@ -132,7 +132,7 @@ async def publish(interaction, opener, guild=None, by_admin=False, screen=None):
     except proposals.Refused as e:
         return await interaction.followup.send(str(e), ephemeral=True)
     p = proposals.fit_quorum(p["no"], people(channel.guild))
-    message = await cards.post(p, channel, vote_buttons(p))
+    message = await cards.post(p, channel, vote_buttons(p), ping=True)
     await interaction.followup.send(f"Proposal {p['no']} is up: {message.jump_url}",
                                     ephemeral=True)
     return p
