@@ -175,8 +175,8 @@ code decides what is allowed: every tool is in one of four tiers, fixed in
 | --- | --- | --- |
 | Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases, onboarding |
 | Personal | Only the member asking, who can undo it: done at once | name color; join or leave a role; nickname; an invite link (up to 10 uses, 24 hours, 5 a day) |
-| Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread; unpin a message |
-| Draft | Changes the server for everyone, or acts on a member: a vote | see below (pinning a message is one: pins are shown to everyone) |
+| Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread |
+| Draft | Changes the server for everyone, or acts on a member: a vote | see below (pinning or unpinning a message is one: pins are shown to everyone) |
 
 What a vote can order, carried out by code when it passes (`actions.py`):
 
@@ -193,7 +193,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 | Rules | reword, add, remove added rules; rules 4 to 6 and the original rules stay |
 | AutoMod | add or remove watch words; blocked words stay |
 | Events | cancel someone else's event |
-| Pins | pin a message, given its link, in a channel members post in |
+| Pins | pin or unpin a message, given its link, in a channel members post in |
 | Members | kick, ban, unban, change or reset a nickname |
 | Settings | any of the settings, within its range |
 | Anything else | a general proposal, written as code by the self-update workflow |

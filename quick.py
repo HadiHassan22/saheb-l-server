@@ -3,9 +3,9 @@
 - Personal: they affect only the member asking, who can undo them: joining
   or leaving a role, their nickname, an invite link to bring someone in.
 - Light: small shared things: an event, a temporary voice channel, a
-  thread, an unpin. They happen at once, are posted in #server-log with who
-  asked, are limited per member, and can be undone by vote. Pins are a vote
-  (actions.py): they are shown to everyone, so members decide them together.
+  thread. They happen at once, are posted in #server-log with who asked,
+  are limited per member, and can be undone by vote. Pins and unpins are a
+  vote (actions.py): they are shown to everyone, so members decide them together.
 - Admin: done on an admin's word alone, posted in #server-log with who
   asked: giving an existing role to every member of the server.
 
@@ -27,7 +27,7 @@ import store
 BEIRUT = ZoneInfo("Asia/Beirut")
 DAY = 24 * 60 * 60
 # How many of each a member can do per day.
-DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10, "unpin": 10}
+DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10}
 EVENTS_EACH, VOICE_EACH, VOICE_TOTAL = 3, 1, 10
 VOICE_HOURS, EMPTY_GRACE = 12, 15 * 60
 
@@ -191,23 +191,6 @@ async def start_thread(member, channel, name):
     await layout.server_log(guild, f"{member.display_name} started the thread "
                                    f"{thread.name} in #{target.name}.")
     return f"Started {thread.mention}."
-
-
-async def unpin(member, link):
-    """Unpin a message by its link. Pinning one is a vote (actions.py)."""
-    guild = member.guild
-    match = actions.LINK.search(str(link or ""))
-    if match is None or int(match[1]) != guild.id:
-        raise Refused("Paste the link to the message (right-click it, Copy Message Link).")
-    target = guild.get_channel(int(match[2]))
-    if not actions.open_to_everyone(guild, target):
-        raise Refused("Messages can only be unpinned in channels members post in.")
-    spend(member.id, "unpin", time.time())
-    message = await target.fetch_message(int(match[3]))
-    await message.unpin(reason=f"Asked for by {member.display_name}")
-    await layout.server_log(guild, f"{member.display_name} unpinned a message in "
-                                   f"#{target.name}: {message.jump_url}")
-    return "Done: unpinned."
 
 
 # ---------- admin ----------
