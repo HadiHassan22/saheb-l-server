@@ -332,12 +332,12 @@ class People(WithTempData):
 
 class Quick(WithTempData):
     def test_each_kind_has_a_daily_allowance(self):
-        for _ in range(quick.DAILY["pin"]):
-            quick.spend(MEMBER, "pin", NOW)
+        for _ in range(quick.DAILY["unpin"]):
+            quick.spend(MEMBER, "unpin", NOW)
         with self.assertRaisesRegex(quick.Refused, "tomorrow"):
-            quick.spend(MEMBER, "pin", NOW + 60)
+            quick.spend(MEMBER, "unpin", NOW + 60)
         quick.spend(MEMBER, "invite", NOW + 60)
-        quick.spend(MEMBER, "pin", NOW + quick.DAY + 1)
+        quick.spend(MEMBER, "unpin", NOW + quick.DAY + 1)
 
     def test_event_times_are_beirut_time_and_near_future(self):
         now = datetime(2026, 9, 24, 12, 0, tzinfo=timezone.utc)
@@ -358,12 +358,77 @@ class Quick(WithTempData):
             with self.assertRaises(quick.Refused):
                 await quick.join_role(member, name)
 
-    async def test_pins_only_by_link_into_this_server(self):
+    async def test_unpins_only_by_link_into_this_server(self):
         member = types.SimpleNamespace(id=MEMBER, guild=guild(), display_name="Hadi")
         with self.assertRaisesRegex(quick.Refused, "link"):
-            await quick.pin(member, "https://discord.com/channels/999/1/2")
+            await quick.unpin(member, "https://discord.com/channels/999/1/2")
         with self.assertRaisesRegex(quick.Refused, "link"):
-            await quick.pin(member, "pin the last message")
+            await quick.unpin(member, "unpin the last message")
+
+
+class Pins(WithTempData):
+    """Pinning is a vote: a message given by its link is checked when it is
+    drafted and again when it is carried out, then pinned. Unpinning is
+    done at once (quick.py)."""
+
+    def guild(self, pinned=False, channel=None):
+        g = mock.create_autospec(discord.Guild, instance=True)
+        g.id = 5
+        channel = channel or self.channel()
+        channel.fetch_message.return_value.pinned = pinned
+        g.get_channel.return_value = channel
+        g.default_role = mock.Mock()
+        return g
+
+    def channel(self, sendable=True):
+        c = mock.create_autospec(discord.TextChannel, instance=True)
+        c.id, c.name = 1, "general"
+        c.overwrites_for.return_value = discord.PermissionOverwrite(
+            send_messages=None if sendable else False)
+        message = mock.create_autospec(discord.Message, instance=True)
+        message.id, message.pinned = 2, False
+        message.jump_url = "https://discord.com/channels/5/1/2"
+        c.fetch_message.return_value = message
+        return c
+
+    async def test_a_pin_is_checked_by_its_link(self):
+        link = "https://discord.com/channels/5/1/2"
+        action = {"kind": actions.PIN, "link": link}
+        self.assertIsNone(await actions.check(self.guild(), action))
+        self.assertEqual((action["channel_id"], action["message_id"], action["channel"]),
+                         (1, 2, "general"))
+        self.assertIn("Paste the link", await actions.check(
+            self.guild(), {"kind": actions.PIN, "link": "pin the last message"}))
+        self.assertIn("Paste the link", await actions.check(
+            self.guild(), {"kind": actions.PIN, "link": "https://discord.com/channels/9/1/2"}))
+        self.assertIn("members post in", await actions.check(
+            self.guild(channel=self.channel(sendable=False)), {"kind": actions.PIN, "link": link}))
+        self.assertIn("already pinned", await actions.check(
+            self.guild(pinned=True), {"kind": actions.PIN, "link": link}))
+
+    async def test_a_message_that_is_gone_is_refused(self):
+        g = self.guild()
+        g.get_channel.return_value.fetch_message.side_effect = discord.NotFound(
+            mock.Mock(status=404), "Unknown Message")
+        self.assertIn("isn't in that channel", await actions.check(
+            g, {"kind": actions.PIN, "link": "https://discord.com/channels/5/1/2"}))
+
+    async def test_a_passed_pin_pins_that_message(self):
+        g = self.guild()
+        action = {"kind": actions.PIN, "link": "https://discord.com/channels/5/1/2"}
+        said = await actions.carry_out(g, action)
+        message = g.get_channel.return_value.fetch_message.return_value
+        message.pin.assert_awaited_once_with(reason=actions.REASON)
+        self.assertEqual(said, "Done: the message in #general is pinned.")
+
+    def test_the_proposal_links_the_message_and_says_what_happens(self):
+        action = {"kind": actions.PIN, "channel": "general",
+                  "link": "https://discord.com/channels/5/1/2"}
+        title, details = actions.describe(action)
+        self.assertEqual(title, "Pin a message in general")
+        self.assertIn("https://discord.com/channels/5/1/2", details)
+        self.assertLessEqual(len("Proposal 99: " + title), 256)  # a card's title
+        self.assertLessEqual(len(details), 4000)                 # one embed
 
 
 class GiveToEveryone(WithTempData):

@@ -52,6 +52,7 @@ SERVER_NAME, SERVER_ICON = "rename_server", "set_server_icon"
 RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
+PIN = "pin_message"  # a message, given its link, in a channel members post in
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 NICKNAME = "rename_member"  # any member's nickname: give them one, or reset it
 PICKER_CREATE, PICKER_EDIT, PICKER_DELETE = "create_picker", "edit_picker", "delete_picker"
@@ -71,7 +72,7 @@ PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SOUND_KINDS + SERVER_KINDS
-         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL, NICKNAME) + PEOPLE_KINDS + PICKER_KINDS
+         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL, NICKNAME, PIN) + PEOPLE_KINDS + PICKER_KINDS
          + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
@@ -80,6 +81,7 @@ CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-
         "automod-alerts", "admin-log", "AFK"}
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
+LINK = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
 MAX_CHANNELS, MAX_ROLES, MAX_RULES = 450, 100, 20
 MAX_EMOJI_BYTES, MAX_STICKER_BYTES, MAX_ICON_BYTES = 256 * 1024, 512 * 1024, 4 * 1024 * 1024
 MAX_SOUND_BYTES, MAX_SOUNDS = 512 * 1024, 5  # the soundboard keeps a small set
@@ -92,6 +94,13 @@ def text_name(name):
     """How Discord would name a text channel: lowercase, dashes for spaces."""
     name = re.sub(r"[^a-z0-9-]", "", re.sub(r"\s+", "-", str(name).strip().lower()))
     return re.sub(r"-{2,}", "-", name).strip("-")[:100]
+
+
+def open_to_everyone(guild, channel):
+    """True for a text channel members can post in: not one of the bot's."""
+    if not isinstance(channel, discord.TextChannel):
+        return False
+    return channel.overwrites_for(guild.default_role).send_messages is not False
 
 
 def core_ids(guild):
@@ -171,6 +180,8 @@ async def check(guild, action):
         return _check_watch(action)
     if kind == EVENT_CANCEL:
         return _check_event(guild, action)
+    if kind == PIN:
+        return await _check_pin(guild, action)
     if kind in PICKER_KINDS:
         return _check_picker(guild, action)
     if kind in ONBOARDING_KINDS:
@@ -615,6 +626,24 @@ def _check_event(guild, action):
     return None
 
 
+async def _check_pin(guild, action):
+    match = LINK.search(str(action.get("link") or ""))
+    if match is None or int(match[1]) != guild.id:
+        return "Paste the link to the message (right-click it, Copy Message Link)."
+    target = guild.get_channel(int(match[2]))
+    if not open_to_everyone(guild, target):
+        return "Messages can only be pinned in channels members post in."
+    try:
+        message = await target.fetch_message(int(match[3]))
+    except discord.NotFound:
+        return "That message isn't in that channel."
+    if message.pinned:
+        return "That message is already pinned."
+    action["channel_id"], action["channel"] = target.id, target.name
+    action["message_id"], action["link"] = message.id, message.jump_url
+    return None
+
+
 async def _check_member(guild, action):
     target = member_id(action.get("member"))
     if target is None:
@@ -723,6 +752,9 @@ def describe(action):
                                "moderator: " + ", ".join(f"`{w}`" for w in a["words"])),
         EVENT_CANCEL: lambda: (f"Cancel the event {a['event']}",
                                f"Cancel the event **{a['event']}**."),
+        PIN: lambda: (f"Pin a message in {a['channel']}",
+                      f"Pin the message {a['link']} in **#{a['channel']}**. Pinned "
+                      "messages are shown to everyone in that channel."),
         KICK: lambda: (f"Kick {a['member_name']}", f"Remove <@{a['member']}> from the server. "
                        "They can come back with a new invite."),
         BAN: lambda: (f"Ban {a['member_name']}", f"Ban <@{a['member']}> from the server."),
@@ -888,6 +920,10 @@ async def _carry_out(guild, action):
     if kind == EVENT_CANCEL:
         await guild.get_scheduled_event(a["event_id"]).cancel(reason=REASON)
         return f"Done: {a['event']} is cancelled."
+    if kind == PIN:
+        message = await guild.get_channel(a["channel_id"]).fetch_message(a["message_id"])
+        await message.pin(reason=REASON)
+        return f"Done: the message in #{a['channel']} is pinned."
     if kind in PICKER_KINDS:
         return await _carry_out_picker(guild, a)
     if kind in ONBOARDING_KINDS:
