@@ -3,15 +3,15 @@
 - Personal: they affect only the member asking, who can undo them: joining
   or leaving a role, their nickname, an invite link to bring someone in.
 - Light: small shared things: an event, a temporary voice channel, a
-  thread, a pin. They happen at once, are posted in #server-log with who
-  asked, are limited per member, and can be undone by vote.
+  thread, an unpin. They happen at once, are posted in #server-log with who
+  asked, are limited per member, and can be undone by vote. Pins are a vote
+  (actions.py): they are shown to everyone, so members decide them together.
 - Admin: done on an admin's word alone, posted in #server-log with who
   asked: giving an existing role to every member of the server.
 
 Each function returns what to tell the member, or raises Refused.
 """
 
-import re
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -27,10 +27,9 @@ import store
 BEIRUT = ZoneInfo("Asia/Beirut")
 DAY = 24 * 60 * 60
 # How many of each a member can do per day.
-DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10, "pin": 10}
+DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10, "unpin": 10}
 EVENTS_EACH, VOICE_EACH, VOICE_TOTAL = 3, 1, 10
 VOICE_HOURS, EMPTY_GRACE = 12, 15 * 60
-LINK = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")
 
 
 class Refused(Exception):
@@ -49,13 +48,6 @@ def spend(member_id, kind, now):
         raise Refused(f"You've used today's {DAILY[kind]}. Try again tomorrow.")
     state["used"][f"{member_id}:{kind}"] = used + [now]
     store.save("quick", state)
-
-
-def open_to_everyone(guild, channel):
-    """True for a text channel members can post in: not one of the bot's."""
-    if not isinstance(channel, discord.TextChannel):
-        return False
-    return channel.overwrites_for(guild.default_role).send_messages is not False
 
 
 def find_channel(guild, name):
@@ -190,7 +182,7 @@ async def create_temp_voice(member, name, hours=3):
 async def start_thread(member, channel, name):
     guild = member.guild
     target = find_channel(guild, channel)
-    if not open_to_everyone(guild, target):
+    if not actions.open_to_everyone(guild, target):
         raise Refused("Threads can only be started in channels members post in.")
     spend(member.id, "thread", time.time())
     thread = await target.create_thread(
@@ -201,24 +193,21 @@ async def start_thread(member, channel, name):
     return f"Started {thread.mention}."
 
 
-async def pin(member, link, pinned=True):
+async def unpin(member, link):
+    """Unpin a message by its link. Pinning one is a vote (actions.py)."""
     guild = member.guild
-    match = LINK.search(str(link or ""))
+    match = actions.LINK.search(str(link or ""))
     if match is None or int(match[1]) != guild.id:
         raise Refused("Paste the link to the message (right-click it, Copy Message Link).")
     target = guild.get_channel(int(match[2]))
-    if not open_to_everyone(guild, target):
-        raise Refused("Messages can only be pinned in channels members post in.")
-    spend(member.id, "pin", time.time())
+    if not actions.open_to_everyone(guild, target):
+        raise Refused("Messages can only be unpinned in channels members post in.")
+    spend(member.id, "unpin", time.time())
     message = await target.fetch_message(int(match[3]))
-    if pinned:
-        await message.pin(reason=f"Asked for by {member.display_name}")
-    else:
-        await message.unpin(reason=f"Asked for by {member.display_name}")
-    done = "pinned" if pinned else "unpinned"
-    await layout.server_log(guild, f"{member.display_name} {done} a message in "
+    await message.unpin(reason=f"Asked for by {member.display_name}")
+    await layout.server_log(guild, f"{member.display_name} unpinned a message in "
                                    f"#{target.name}: {message.jump_url}")
-    return f"Done: {done}."
+    return "Done: unpinned."
 
 
 # ---------- admin ----------
