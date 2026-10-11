@@ -53,6 +53,7 @@ RULE_EDIT, RULE_ADD, RULE_REMOVE = "edit_rule", "add_rule", "remove_rule"
 WATCH_ADD, WATCH_REMOVE = "add_watch_words", "remove_watch_words"
 EVENT_CANCEL = "cancel_event"
 PIN = "pin_message"  # a message, given its link, in a channel members post in
+UNPIN = "unpin_message"  # the same, taking the pin off: a vote too
 KICK, BAN, UNBAN = "kick_member", "ban_member", "unban_member"
 NICKNAME = "rename_member"  # any member's nickname: give them one, or reset it
 PICKER_CREATE, PICKER_EDIT, PICKER_DELETE = "create_picker", "edit_picker", "delete_picker"
@@ -72,8 +73,8 @@ PEOPLE_KINDS = (KICK, BAN, UNBAN)
 PICKER_KINDS = (PICKER_CREATE, PICKER_EDIT, PICKER_DELETE)
 ONBOARDING_KINDS = (ONBOARDING_CHANNELS, ONBOARDING_QUESTION, ONBOARDING_REMOVE)
 KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SOUND_KINDS + SERVER_KINDS
-         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL, NICKNAME, PIN) + PEOPLE_KINDS + PICKER_KINDS
-         + ONBOARDING_KINDS)
+         + RULE_KINDS + WATCH_KINDS + (EVENT_CANCEL, NICKNAME, PIN, UNPIN) + PEOPLE_KINDS
+         + PICKER_KINDS + ONBOARDING_KINDS)
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
@@ -180,7 +181,7 @@ async def check(guild, action):
         return _check_watch(action)
     if kind == EVENT_CANCEL:
         return _check_event(guild, action)
-    if kind == PIN:
+    if kind in (PIN, UNPIN):
         return await _check_pin(guild, action)
     if kind in PICKER_KINDS:
         return _check_picker(guild, action)
@@ -632,13 +633,15 @@ async def _check_pin(guild, action):
         return "Paste the link to the message (right-click it, Copy Message Link)."
     target = guild.get_channel(int(match[2]))
     if not open_to_everyone(guild, target):
-        return "Messages can only be pinned in channels members post in."
+        return "Messages can only be pinned or unpinned in channels members post in."
     try:
         message = await target.fetch_message(int(match[3]))
     except discord.NotFound:
         return "That message isn't in that channel."
-    if message.pinned:
+    if message.pinned and action["kind"] == PIN:
         return "That message is already pinned."
+    if not message.pinned and action["kind"] == UNPIN:
+        return "That message isn't pinned."
     action["channel_id"], action["channel"] = target.id, target.name
     action["message_id"], action["link"] = message.id, message.jump_url
     return None
@@ -755,6 +758,8 @@ def describe(action):
         PIN: lambda: (f"Pin a message in {a['channel']}",
                       f"Pin the message {a['link']} in **#{a['channel']}**. Pinned "
                       "messages are shown to everyone in that channel."),
+        UNPIN: lambda: (f"Unpin a message in {a['channel']}",
+                        f"Unpin the message {a['link']} in **#{a['channel']}**."),
         KICK: lambda: (f"Kick {a['member_name']}", f"Remove <@{a['member']}> from the server. "
                        "They can come back with a new invite."),
         BAN: lambda: (f"Ban {a['member_name']}", f"Ban <@{a['member']}> from the server."),
@@ -920,10 +925,13 @@ async def _carry_out(guild, action):
     if kind == EVENT_CANCEL:
         await guild.get_scheduled_event(a["event_id"]).cancel(reason=REASON)
         return f"Done: {a['event']} is cancelled."
-    if kind == PIN:
+    if kind in (PIN, UNPIN):
         message = await guild.get_channel(a["channel_id"]).fetch_message(a["message_id"])
-        await message.pin(reason=REASON)
-        return f"Done: the message in #{a['channel']} is pinned."
+        if kind == PIN:
+            await message.pin(reason=REASON)
+            return f"Done: the message in #{a['channel']} is pinned."
+        await message.unpin(reason=REASON)
+        return f"Done: the message in #{a['channel']} is unpinned."
     if kind in PICKER_KINDS:
         return await _carry_out_picker(guild, a)
     if kind in ONBOARDING_KINDS:

@@ -179,9 +179,9 @@ class Tiers(unittest.TestCase):
         self.assertEqual(tier(assistant.SELF), {
             "set_my_color", "join_role", "leave_role", "set_my_nickname", "create_invite"})
         self.assertEqual(tier(assistant.LIGHT), {
-            "create_event", "cancel_my_event", "create_temp_voice", "start_thread",
-            "unpin_message"})
+            "create_event", "cancel_my_event", "create_temp_voice", "start_thread"})
         self.assertIn("draft_pin_message", tier(assistant.DRAFT))
+        self.assertIn("draft_unpin_message", tier(assistant.DRAFT))
         self.assertTrue(all(n.startswith(("draft_", "get_", "list_"))
                             for n in tier(assistant.DRAFT) | tier(assistant.LOOK)))
 

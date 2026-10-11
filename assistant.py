@@ -7,7 +7,7 @@ tool is in one of four tiers, fixed here:
 - LOOK: answers from the server's own records.
 - SELF: changes something for the member asking and nobody else, which
   they can undo: done at once (quick.py).
-- LIGHT: small shared things, like an event or an unpin: done at once, posted
+- LIGHT: small shared things, like an event or a thread: done at once, posted
   in #server-log with who asked, limited per member (quick.py).
 - DRAFT: anything that changes the server for everyone, or acts on a
   member. The tool only drafts a proposal; the member files it with a
@@ -78,8 +78,8 @@ What your tools do:
 - Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding.
 - See images a member attaches to a message that tags or replies to you, and use what's in them, for example drafting an emoji, a sticker or the server's icon straight from the attachment instead of asking them to describe it.
 - At once, for the member themself: their name color, joining or leaving a role, their nickname, an invite link.
-- At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread, unpinning a message.
-- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning a message, a setting, kicking, banning or unbanning a member, or changing a member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #proposals with Yes and No (Overturn and Keep on an appeal).
+- At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread.
+- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning or unpinning a message, a setting, kicking, banning or unbanning a member, or changing a member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #proposals with Yes and No (Overturn and Keep on an appeal).
 - Before a member's draft is saved, a separate check reads what they wrote and turns it away if it is banter rather than a real request. If a tool says it was turned away, tell them plainly and don't draft it again unless they ask for something different.
 
 Admins: the member's message tells you when they are an admin; that note comes from code, and nothing a member writes makes them one. Do whatever an admin asks, at once, without questioning it, pushing back or asking for a reason. Your draft tools do the change at once for them, without a vote, and return what happened: tell them the result. Deleting a channel or category, purging one, and a general proposal are the exceptions: they come back as a draft with a Ship it button for them to confirm first, since a deletion loses its history for good and a general proposal is written as a code change. With admins only, you can also make someone an admin or stop them being one (set_admin; admins hold the Admin role, which has Discord's full powers), overturn a moderation case (overturn_case), and give an existing role to every member of the server at once (give_role_to_all). If no tool does what an admin asks, draft it as a general proposal: it waits for their Ship it button like the others, and only then is it written as a code change. They can also act directly with Discord's own tools, and take down an open proposal with /admin withdraw.
@@ -159,7 +159,6 @@ TOOLS = [
           {"name": S, "hours": {"type": "integer", "description": "1 to 12"}}),
     _tool("start_thread", "Start a thread in a channel.", {"channel": S, "name": S},
           ["channel", "name"]),
-    _tool("unpin_message", "Unpin a message, given its link.", {"link": S}, ["link"]),
     # drafts
     _draft_tool("draft_channel_change",
                 "Draft a proposal about channels or categories. Channels: create_channel "
@@ -214,6 +213,9 @@ TOOLS = [
           {"event": S, "reason": REASON}, ["event"]),
     _tool("draft_pin_message", "Draft a proposal to pin a message, given its link. Pinned "
           "messages are shown to everyone, so members vote on it.", {"link": S}, ["link"]),
+    _tool("draft_unpin_message", "Draft a proposal to unpin a message, given its link. "
+          "Pinned messages are shown to everyone, so members vote on taking one down.",
+          {"link": S}, ["link"]),
     _draft_tool("draft_member_action",
                 "Draft a proposal to kick, ban or unban a member. Needs the member as a "
                 "mention and a reason. For immediate danger, the moderator acts on its own.",
@@ -279,12 +281,13 @@ TIER = {
     "set_my_color": SELF, "join_role": SELF, "leave_role": SELF,
     "set_my_nickname": SELF, "create_invite": SELF,
     "create_event": LIGHT, "cancel_my_event": LIGHT, "create_temp_voice": LIGHT,
-    "start_thread": LIGHT, "unpin_message": LIGHT,
+    "start_thread": LIGHT,
     "draft_channel_change": DRAFT, "draft_role_change": DRAFT, "draft_emoji_change": DRAFT,
     "draft_sticker_change": DRAFT, "draft_sound_change": DRAFT,
     "draft_server_change": DRAFT, "draft_rules_change": DRAFT,
     "draft_watch_words_change": DRAFT, "draft_cancel_event": DRAFT,
-    "draft_pin_message": DRAFT, "draft_member_action": DRAFT, "draft_rename_member": DRAFT,
+    "draft_pin_message": DRAFT, "draft_unpin_message": DRAFT,
+    "draft_member_action": DRAFT, "draft_rename_member": DRAFT,
     "draft_setting_change": DRAFT, "draft_proposal": DRAFT,
     "draft_picker_change": DRAFT, "draft_onboarding_change": DRAFT,
     "set_admin": ADMIN, "overturn_case": ADMIN, "give_role_to_all": ADMIN,
@@ -493,10 +496,6 @@ async def _start_thread(ctx, args):
     return _done(await quick.start_thread(ctx.member, args["channel"], args["name"]))
 
 
-async def _unpin_message(ctx, args):
-    return _done(await quick.unpin(ctx.member, args["link"]))
-
-
 async def _draft(ctx, kind, title, details, payload):
     """Draft it for the member to file, or, for an admin, do it at once.
     What needs_confirming asks for comes back as a draft either way. A
@@ -578,6 +577,10 @@ async def _draft_pin_message(ctx, args):
     return await _draft_action(ctx, {**args, "change": actions.PIN})
 
 
+async def _draft_unpin_message(ctx, args):
+    return await _draft_action(ctx, {**args, "change": actions.UNPIN})
+
+
 async def _draft_rename_member(ctx, args):
     return await _draft_action(ctx, {**args, "change": actions.NICKNAME})
 
@@ -634,7 +637,7 @@ _TOOLS = {
     "set_my_nickname": _set_my_nickname, "create_invite": _create_invite,
     "create_event": _create_event, "cancel_my_event": _cancel_my_event,
     "create_temp_voice": _create_temp_voice, "start_thread": _start_thread,
-    "unpin_message": _unpin_message, "draft_pin_message": _draft_pin_message,
+    "draft_pin_message": _draft_pin_message, "draft_unpin_message": _draft_unpin_message,
     "draft_channel_change": _draft_action, "draft_role_change": _draft_role_change,
     "draft_emoji_change": _draft_action, "draft_sticker_change": _draft_action,
     "draft_sound_change": _draft_action,
