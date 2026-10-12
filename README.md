@@ -391,7 +391,9 @@ AutoMod is the net, and the bot is the judge:
      as below: Jev alone never takes anyone out of the conversation.
    - **30% to 80%, or the message talks to the moderator:** Jev is unsure,
      so Haiku reviews the conversation and decides. When Haiku is unsure,
-     it is not a violation. Lebanese swearing built on sexual words is
+     it is not a violation, and offensive opinions and harsh words about
+     ideas, beliefs, religions or politicians are allowed: the rules are
+     about attacks on people. Lebanese swearing built on sexual words is
      swearing, not sexual content, for both judges.
    - **Under 30%:** cleared. Nothing happens and nothing is posted.
 5. **The sanction is picked in code**, never by a model, from the severity
@@ -399,9 +401,14 @@ AutoMod is the net, and the bot is the judge:
    - mild: a warning; after 3 warnings, a timeout
    - serious: a warning; with any record, a timeout (60 minutes first, 24
      hours after that); after 2 timeouts, the admins are called
-   - severe (threats, doxxing, anything sexual involving minors, scams):
-     the admins are called. Insults and hate are never severe, whichever
-     judge decides.
+   - severe: the admins are called. This is a free speech server, so
+     severe means real danger to a real person, never words alone: a
+     specific threat to hurt someone that is meant seriously, posting
+     someone's phone number or address, anything sexual involving minors,
+     or a scam or phishing link. Insults, slurs, swearing, dark jokes,
+     offensive opinions and wishing someone harm are never severe, and
+     only the rules on threats, doxxing, sexual content and scams can be,
+     whichever judge decides. When unsure, it is serious at most.
 
    **The bot never bans.** When the admins are called, the member is held
    in a timeout (24 hours, the later timeout length) and the Admin role

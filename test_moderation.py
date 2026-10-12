@@ -87,6 +87,26 @@ class FirstCheck(unittest.TestCase):
                                   "explanation": "Insulted a member."})
         self.assertEqual(reviewed.severity, "serious")
 
+    def test_only_threats_doxxing_sexual_content_and_scams_can_be_severe(self):
+        self.assertEqual({rule for rule in range(1, 12)
+                          if judge.capped(rule, "severe") == "severe"}, {3, 4, 5, 6})
+        self.assertEqual(judge.capped(7, "serious"), "serious")
+        self.assertEqual(judge.capped(1, "mild"), "mild")
+
+    def test_both_judges_are_told_words_alone_are_never_severe(self):
+        self.assertIn("Words alone are never severe", judge.SEVERITY_LEVELS[3])
+        prompt = judge.review_prompt("x")
+        self.assertIn("Words alone are never severe", prompt)
+        self.assertIn("serious at most", prompt)
+        self.assertIn("free speech server", prompt)
+
+    def test_joking_that_someone_got_doxxed_is_not_doxxing(self):
+        question, true, false = judge.HAZARDS["doxxing"][1:]
+        self.assertEqual(judge.HAZARDS["doxxing"][0], 4)  # the protected floor
+        self.assertIn("actually contains", true)
+        self.assertIn("horsy doxxed", false)
+        self.assertIn("is not doxxing", judge.review_prompt("x"))
+
     def test_the_first_check_alone_only_ever_warns(self):
         v = judge.Verdict(rule=1, severity="serious", explanation="", decided_by="first check")
         self.assertTrue(judge.stands_alone(v, CLEAN, DEFAULTS))
