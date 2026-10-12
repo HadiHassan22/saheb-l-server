@@ -41,6 +41,11 @@ def last_action_at(user_id):
     return max(times, default=None)
 
 
+def about_message(message_id):
+    """True if a case was already opened on this message."""
+    return any(c.get("message_id") == message_id for c in _load()["cases"].values())
+
+
 def open_case(now, **fields):
     """Record an action and return the case with its number. `fields`:
     user_id, action, minutes, deleted, rule, severity, explanation, scores,

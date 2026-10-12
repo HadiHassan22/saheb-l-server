@@ -1,13 +1,17 @@
-"""Acts on AutoMod alerts: gathers the conversation around a flagged
-message, has it judged (see judge.py), applies the sanction, tells the
-member, posts the case in #mod-log, and has Saheb reply to the message
-with a telling-off (scold.py). Also the owner's /ai-key.
+"""Acts on AutoMod alerts, and on messages members flag with 🚩
+(flags.py): gathers the conversation around a flagged message, has it
+judged (see judge.py), applies the sanction, tells the member, posts the
+case in #mod-log, and has Saheb reply to the message with a telling-off
+(scold.py). Also the owner's /ai-key.
+
+A 🚩 flag brings the message itself, not anyone's account of it, so a
+member can't get someone punished by lying to Saheb about what they said.
 
 The flagged message stays up, so moderation is a scolding in front of
 everyone rather than a message quietly vanishing. Only private
 information, sexual content and scams are deleted (judge.removes).
 
-The bot never reads messages AutoMod did not flag. For a flagged one it
+The bot never reads messages AutoMod or a member did not flag. For a flagged one it
 reads the few messages before it, because the same word is a joke in one
 conversation and an attack in another.
 
@@ -164,23 +168,89 @@ async def handle(execution):
         if verdict is None:
             return
 
-    sanction = judge.sanction(verdict.severity, record, s)
+    await _act(guild, member, channel, execution.message_id, execution.content,
+               verdict, judge.sanction(verdict.severity, record, s), record,
+               screening, state, now)
+
+
+async def handle_flag(message):
+    """A message a member flagged with 🚩 (flags.py). Judged like an alert,
+    from what the message and the conversation say, never from who flagged
+    it. It is always reviewed: the first check alone never acts on a flag,
+    since AutoMod saw nothing. When no rule was broken, Saheb replies to it
+    instead, and a flag never costs more than `flag_timeout_minutes`."""
+    guild, member, channel = message.guild, message.author, message.channel
+    last = cases.last_action_at(member.id)
+    if last and time.time() - last < COOLDOWN:
+        return
+    content = message.content[:1000]
+    lines = await _context(channel, message.id)
+    state = judge.state(lines, member.display_name, content)
+    try:
+        screening = judge.screen(await ai.first_check(state, judge.questions()))
+    except ai.Unavailable as e:
+        return await _paused(guild, str(e))
+    except providers.ProviderError as e:
+        return log.warning(f"first check of a flag failed: {e}")
+    log.info(f"flag on {member.id}: {screening.top} {screening.top_score:.2f}")
+    supported = screening.self_harm >= judge.SUPPORT_AT
+    if supported:
+        await _support(member)
+    s = settings.current()
+    verdict = None
+    if judge.route(screening, s) != judge.CLEAR:
+        try:
+            verdict = judge.verdict(await ai.review(judge.review_prompt(state),
+                                                    judge.REVIEW_SCHEMA))
+        except ai.Unavailable as e:
+            return await _paused(guild, str(e))
+        except providers.ProviderError as e:
+            return log.warning(f"review of a flag failed: {e}")
+    if verdict is None:
+        if not supported:  # no jokes at someone who may be hurting
+            await _reply(message, state)
+        return
+    now = int(time.time())
+    record = cases.record_of(member.id, now, s["warning_days"])
+    await _act(guild, member, channel, message.id, content, verdict,
+               judge.flag_sanction(verdict.severity, record, s), record,
+               screening, state, now, flagged=True)
+
+
+async def _act(guild, member, channel, message_id, content, verdict, sanction, record,
+               screening, state, now, flagged=False):
+    """Open the case, carry it out, log it, scold, and call the admins if
+    it needs them."""
     case = cases.open_case(
         now, user_id=member.id, action=sanction.action, minutes=sanction.minutes,
         deleted=False, rule=verdict.rule, severity=verdict.severity,
         explanation=verdict.explanation, scores=screening.scores, record=record,
-        channel_id=channel.id, message_id=execution.message_id,
-        excerpt=execution.content[:300], decided_by=verdict.decided_by,
-        called_admins=sanction.call_admins,
+        channel_id=channel.id, message_id=message_id,
+        excerpt=content[:300], decided_by=verdict.decided_by,
+        called_admins=sanction.call_admins, flagged=flagged,
     )
     delete = judge.removes(verdict.rule)
-    problem = await _apply(guild, member, channel, execution.message_id, sanction,
-                           delete, case)
+    problem = await _apply(guild, member, channel, message_id, sanction, delete, case)
     case = cases.update(case["no"], deleted=delete and not problem, problem=problem)
     await _post(guild, member, case, screening)
     await _scold(channel, member, case, state)
     if sanction.call_admins:
         await _call_admins(guild, member, channel, case)
+
+
+async def _reply(message, state):
+    """Saheb's answer to a flagged message that broke no rule. Written after
+    the decision, like a scolding, so it can't change it."""
+    try:
+        answer = await ai.review(scold.cleared_prompt(state), scold.SCHEMA)
+    except (ai.Unavailable, providers.ProviderError) as e:
+        log.warning(f"reply to a flag not written: {e}")
+        answer = None
+    try:
+        await message.reply(scold.cleared(answer, message.id), mention_author=False,
+                            allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException as e:
+        log.warning(f"couldn't reply to a flagged message: {e!r}")
 
 
 async def _explained(verdict, state, screening):
@@ -277,7 +347,9 @@ async def _post(guild, member, case, screening):
     )
     embed.add_field(
         name="Decided by",
-        value=("the first check, which was sure enough to act on its own"
+        value=("a review, because a member flagged the message with 🚩"
+               if case.get("flagged") else
+               "the first check, which was sure enough to act on its own"
                if case["decided_by"] == judge.FIRST_CHECK
                else "a second review, because the first check was unsure or "
                     "its verdict meant more than a warning"),

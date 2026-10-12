@@ -199,6 +199,17 @@ class Sanctions(unittest.TestCase):
         got = judge.sanction("mild", CLEAN, s)
         self.assertEqual((got.action, got.minutes), (cases.TIMEOUT, 15))
 
+    def test_a_flag_never_costs_more_than_a_short_timeout(self):
+        for severity in judge.SEVERITIES:
+            for n in range(5):
+                record = {"warnings": n, "timeouts": n}
+                got = judge.flag_sanction(severity, record, DEFAULTS)
+                self.assertIn(got.action, (cases.WARN, cases.TIMEOUT))
+                self.assertLessEqual(got.minutes, 5)
+        self.assertEqual(judge.flag_sanction("mild", CLEAN, DEFAULTS).action, cases.WARN)
+        got = judge.flag_sanction("severe", CLEAN, dict(DEFAULTS, flag_timeout_minutes=2))
+        self.assertEqual((got.action, got.minutes, got.call_admins), (cases.TIMEOUT, 2, True))
+
 
 class Records(unittest.TestCase):
     def setUp(self):
@@ -359,5 +370,19 @@ class Scolding(unittest.TestCase):
     def test_every_stock_line_fits(self):
         for n in range(len(scold.FALLBACKS)):
             text = scold.reply(None, dict(self.CASE, no=n))
+            self.assertLessEqual(len(text), 2000)
+            self.assertNotIn("—", text)
+
+    def test_a_cleared_flag_gets_a_reply_that_fits(self):
+        prompt = scold.cleared_prompt("Flagged message: x")
+        self.assertIn("breaks no rule", prompt)
+        self.assertIn("who flagged it", prompt)
+        self.assertIn("No politics, religion or sect", prompt)
+        text = scold.cleared({"reply": "ahla — " + "x" * 3000}, 1)
+        self.assertLessEqual(len(text), 2000)
+        self.assertNotIn("—", text)
+        self.assertTrue(text.endswith("-# Flagged with 🚩 · no rule broken"))
+        for n in range(len(scold.CLEARED_FALLBACKS)):
+            text = scold.cleared(None, n)
             self.assertLessEqual(len(text), 2000)
             self.assertNotIn("—", text)

@@ -118,6 +118,7 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         ]
         for p in self.patches:
             p.start()
+        moderator._supported.clear()  # the support line is sent once a day
         self.reviews = []
         self.review_answer = {}
         self.scolds = []
@@ -342,6 +343,72 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(channel.deleted, [])
         self.assertIn("Attacked a community", case["explanation"])
         self.assertIn("Attacked a community", self.log.sent[0].description)
+
+    async def run_flag(self, answers, content="ya 7mar, no one wants you here",
+                       member=None):
+        """A message a member flagged with 🚩 (flags.py does the checks
+        before this)."""
+        member = member or Member()
+        channel = Channel([("rami", "stop insulting me")])
+        message = types.SimpleNamespace(
+            id=123, content=content, author=member, channel=channel,
+            guild=alert(member, channel, content).guild, replies=[])
+
+        async def reply(text, **kwargs):
+            message.replies.append(text)
+        message.reply = reply
+        with mock.patch.object(ai, "first_check", mock.AsyncMock(return_value=answers)):
+            await moderator.handle_flag(message)
+        return member, channel, message
+
+    async def test_a_flag_is_always_reviewed_and_its_timeout_kept_short(self):
+        self.review_answer = {"violation": True, "rule": 1, "severity": "serious",
+                              "explanation": "Insulted a member after being asked to stop."}
+        member = Member()
+        cases.open_case(int(time.time()) - 3600, user_id=member.id,
+                        action=cases.TIMEOUT, minutes=60)
+        _, channel, _ = await self.run_flag(jev(1.8, harassment=0.96), member=member)
+        self.assertEqual(len(self.reviews), 1)
+        self.assertNotIn("not yours to review", self.reviews[0])  # not Jev's alone
+        case = cases.get(2)
+        self.assertEqual((case["action"], case["minutes"], case["flagged"]),
+                         (cases.TIMEOUT, 5, True))
+        self.assertEqual(member.timed_out, timedelta(minutes=5))
+        self.assertEqual(channel.references, [123])  # scolded in a reply
+        fields = {f.name: f.value for f in self.log.sent[0].fields}
+        self.assertIn("flagged the message with 🚩", fields["Decided by"])
+
+    async def test_a_severe_flag_calls_the_admins_but_still_holds_five_minutes(self):
+        self.review_answer = {"violation": True, "rule": 3, "severity": "severe",
+                              "explanation": "Threatened a member's home."}
+        member, _, _ = await self.run_flag(jev(2.8, threat=0.91))
+        case = cases.get(1)
+        self.assertEqual((case["minutes"], case["called_admins"]), (5, True))
+        self.assertEqual(member.timed_out, timedelta(minutes=5))
+        self.assertIn("<@&5> Case 1 needs you", self.admin_log.sent[0])
+
+    async def test_a_flag_that_breaks_no_rule_gets_a_reply(self):
+        self.review_answer = {"violation": False, "rule": 0, "severity": "none",
+                              "explanation": ""}
+        self.scold_answer = {"reply": "Ahla w sahla, nothing wrong here."}
+        member, channel, message = await self.run_flag(jev(1.0, harassment=0.55))
+        self.assertIsNone(cases.get(1))
+        self.assertEqual((member.sent, self.log.sent, channel.sent), ([], [], []))
+        self.assertEqual(message.replies, [
+            "Ahla w sahla, nothing wrong here.\n-# Flagged with 🚩 · no rule broken"])
+        self.assertIn("breaks no rule", self.scolds[0])
+
+    async def test_a_flag_jev_clears_is_answered_without_a_review(self):
+        _, _, message = await self.run_flag(jev(0.1, harassment=0.05), content="hi all")
+        self.assertEqual(self.reviews, [])
+        self.assertEqual(len(message.replies), 1)
+        self.assertIsNone(cases.get(1))
+
+    async def test_a_flag_on_someone_who_may_be_hurting_gets_no_joke(self):
+        member, _, message = await self.run_flag(jev(0.5, self_harm=0.9),
+                                                 content="i want to kill myself")
+        self.assertIn("1564", member.sent[0])
+        self.assertEqual((message.replies, self.scolds), ([], []))
 
 
 if __name__ == "__main__":

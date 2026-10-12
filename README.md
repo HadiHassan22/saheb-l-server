@@ -40,9 +40,10 @@ the bot or directly (read from Discord's audit log), is posted in
 reports on code changes, with links.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
-passes it messages with flagged words in English or Arabic, and it reads
-the conversation around each one and decides: nothing, a warning, or a
-timeout. Instead of deleting the message, Saheb replies to it with a
+passes it messages with flagged words in English or Arabic, and anyone can
+flag a message by reacting with 🚩. It reads the conversation around each
+one and decides: nothing, a warning, or a timeout (at most 5 minutes for a
+🚩). Instead of deleting the message, Saheb replies to it with a
 telling-off. It never bans: severe or repeated violations are passed to
 the admins, who decide. Every action is posted in `#mod-log` with the
 reasoning.
@@ -361,7 +362,7 @@ Leaving and rejoining restarts that clock.
 
 ## Moderation
 
-AutoMod is the net, and the bot is the judge:
+AutoMod and members' 🚩 are the net, and the bot is the judge:
 
 1. **AutoMod flags.** Broad watch lists in English, Arabic script and
    Arabizi (Arabic in Latin letters and digits) send matches to the bot
@@ -415,7 +416,20 @@ AutoMod is the net, and the bot is the judge:
    (`scold.py`). Private information, sexual content and scams are the
    exception: they are deleted, and Saheb scolds the member in the
    channel instead.
-7. **Everything is public.** The member gets a DM, and `#mod-log` gets the
+7. **Members can flag a message with 🚩.** Telling Saheb about someone in
+   chat only gives it your word, and it doesn't act on that: it asks you
+   to react to the message itself with 🚩 instead. The bot takes the 🚩
+   off again at once, so nobody sees who flagged it, and judges the
+   message from what it and the eight before it say, never from who
+   flagged it. Jev checks it first, and anything it doesn't clear is
+   always reviewed by Haiku, since AutoMod saw nothing. If a rule was
+   broken, the case goes as above, except that the timeout lasts at most
+   5 minutes (`flag_timeout_minutes`); what deserves more still calls the
+   admins. If not, Saheb replies to the message in its own voice, with
+   "Flagged with 🚩 · no rule broken" underneath. Each message is judged
+   once, only within a day of being posted, and each member can flag 5
+   messages an hour (`flags.py`).
+8. **Everything is public.** The member gets a DM, and `#mod-log` gets the
    case: the rule, the explanation, the member's record, Jev's score, and
    which judge decided. The flagged message is quoted behind a spoiler,
    except for private information, sexual content and scam links, which
@@ -442,6 +456,7 @@ Every number above is a setting the community can change by vote:
 | How sure the first check must be to act alone | 80% | 50% to 99% |
 | How likely a message must look to get a second look | 30% | 10% to 90% |
 | How sure the sectarian talk check must be to pass a message on | 80% | 50% to 99% |
+| Longest timeout for a message flagged with 🚩 | 5 minutes | 1 to 5 minutes |
 
 The ranges are set in code, not by a vote on a setting. A code change can
 widen a range; only one an admin shipped can narrow or remove one.
@@ -451,7 +466,7 @@ Known limits:
 - Discord's AutoMod never applies to members with Administrator or Manage
   Server, which includes the owner. The bot can't change that.
 - The bot can only act on members whose highest role is below its own.
-- Anything AutoMod doesn't flag is never seen. The watch lists are in
+- Anything AutoMod or a member's 🚩 doesn't flag is never seen. The watch lists are in
   `automod.py`. That includes messages that tag the bot or reply to it:
   it reads them to answer them, not to moderate them.
 
@@ -578,8 +593,9 @@ one changed, and is told why it wasn't kept.
 | `automod.py` | The AutoMod rules and watch lists |
 | `banter.py` | The banter check a member's proposal passes before it opens; no Discord |
 | `judge.py` | The questions, routing, verdicts and sanction ladder; no Discord |
-| `moderator.py` | Handles AutoMod alerts, applies sanctions, posts cases; `/ai-key` |
-| `scold.py` | Saheb's telling-off reply to a message the moderator acted on; no Discord |
+| `moderator.py` | Handles AutoMod alerts and 🚩 flags, applies sanctions, posts cases; `/ai-key` |
+| `flags.py` | The 🚩 reaction: who may flag what, and how often |
+| `scold.py` | Saheb's telling-off reply to a message the moderator acted on, and its reply to a 🚩 that broke no rule; no Discord |
 | `cases.py` | Numbered moderation cases and each member's record |
 | `appeals.py` | `/appeal`, the Appeal button, and the appeal kind of proposal |
 | `ai.py` | The OpenRouter key, the two model calls, and the monthly budget (protected) |
