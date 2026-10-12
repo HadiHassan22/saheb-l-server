@@ -1,10 +1,19 @@
 """Acts on AutoMod alerts: gathers the conversation around a flagged
 message, has it judged (see judge.py), applies the sanction, tells the
-member, and posts the case in #mod-log. Also the owner's /ai-key.
+member, posts the case in #mod-log, and has Saheb reply to the message
+with a telling-off (scold.py). Also the owner's /ai-key.
+
+The flagged message stays up, so moderation is a scolding in front of
+everyone rather than a message quietly vanishing. Only private
+information, sexual content and scams are deleted (judge.removes).
 
 The bot never reads messages AutoMod did not flag. For a flagged one it
 reads the few messages before it, because the same word is a joke in one
 conversation and an attack in another.
+
+The bot never bans. A severe violation, or a serious one from a member
+already timed out too often, holds the member in a timeout and pings the
+Admin role in #admin-log: banning is the admins' call.
 
 A message with one of the sectarian watch words is handled with care:
 inside #politics-and-religion, where that talk belongs, nothing happens at
@@ -20,6 +29,7 @@ from datetime import timedelta
 import discord
 from discord import app_commands
 
+import admins
 import ai
 import appeals
 import automod
@@ -28,6 +38,7 @@ import conduct
 import judge
 import layout
 import providers
+import scold
 import settings
 
 log = logging.getLogger("moderator")
@@ -133,8 +144,15 @@ async def handle(execution):
     route = judge.route(screening, s)
     if route == judge.CLEAR:
         return
+    now = int(time.time())
+    record = cases.record_of(member.id, now, s["warning_days"])
+    verdict = None
     if route == judge.ACT:
-        verdict = await _explained(judge.first_check_verdict(screening), state, screening)
+        verdict = judge.first_check_verdict(screening)
+        if not judge.stands_alone(verdict, record, s):
+            verdict = None  # a timeout or a ban is always reviewed
+    if verdict is not None:
+        verdict = await _explained(verdict, state, screening)
     else:
         try:
             verdict = judge.verdict(await ai.review(judge.review_prompt(state),
@@ -146,8 +164,6 @@ async def handle(execution):
         if verdict is None:
             return
 
-    now = int(time.time())
-    record = cases.record_of(member.id, now, s["warning_days"])
     sanction = judge.sanction(verdict.severity, record, s)
     case = cases.open_case(
         now, user_id=member.id, action=sanction.action, minutes=sanction.minutes,
@@ -155,11 +171,16 @@ async def handle(execution):
         explanation=verdict.explanation, scores=screening.scores, record=record,
         channel_id=channel.id, message_id=execution.message_id,
         excerpt=execution.content[:300], decided_by=verdict.decided_by,
+        called_admins=sanction.call_admins,
     )
-    problem = await _apply(guild, member, channel, execution.message_id, sanction, case)
-    case = cases.update(case["no"], deleted=sanction.delete and not problem,
-                        problem=problem)
+    delete = judge.removes(verdict.rule)
+    problem = await _apply(guild, member, channel, execution.message_id, sanction,
+                           delete, case)
+    case = cases.update(case["no"], deleted=delete and not problem, problem=problem)
     await _post(guild, member, case, screening)
+    await _scold(channel, member, case, state)
+    if sanction.call_admins:
+        await _call_admins(guild, member, channel, case)
 
 
 async def _explained(verdict, state, screening):
@@ -175,7 +196,7 @@ async def _explained(verdict, state, screening):
     return verdict
 
 
-async def _apply(guild, member, channel, message_id, sanction, case):
+async def _apply(guild, member, channel, message_id, sanction, delete, case):
     """Carry out the sanction. Returns None, or what could not be done."""
     if member.id == guild.owner_id or member.top_role >= guild.me.top_role:
         return "the bot's role is not above this member's, so nothing was applied"
@@ -184,25 +205,48 @@ async def _apply(guild, member, channel, message_id, sanction, case):
         await member.send(
             f"**{cases.label(case)}** in {guild.name}, case {case['no']}.\n"
             f"{case['explanation']} (Rule {case['rule']}: {title}.)\n"
-            "Every case is posted publicly in the server's #mod-log. If you think "
+            + ("The admins have been asked to look at it.\n" if case["called_admins"] else "")
+            + "Every case is posted publicly in the server's #mod-log. If you think "
             "it's wrong, press Appeal and the community will vote on it.",
             view=appeals.appeal_view(case["no"]))
     except discord.HTTPException:
         pass  # DMs closed; the public log still says it
     reason = f"Case {case['no']}: rule {case['rule']}"
     try:
-        if sanction.delete and message_id:
+        if delete and message_id:
             try:
                 await channel.get_partial_message(message_id).delete()
             except discord.NotFound:
                 pass
         if sanction.action == cases.TIMEOUT:
             await member.timeout(timedelta(minutes=sanction.minutes), reason=reason)
-        elif sanction.action == cases.BAN:
-            await guild.ban(member, reason=reason, delete_message_seconds=3600)
     except discord.HTTPException as e:
         return f"Discord refused: {e.text or e.status}"
     return None
+
+
+async def _scold(channel, member, case, state):
+    """Saheb tells the member off: a reply to the flagged message, or a
+    mention in the channel when the message was deleted. The case is
+    already decided, so a reply that can't be written gets a stock line."""
+    try:
+        answer = await ai.review(scold.prompt(state, case), scold.SCHEMA)
+    except (ai.Unavailable, providers.ProviderError) as e:
+        log.warning(f"scolding not written: {e}")
+        answer = None
+    text = scold.reply(answer, case)
+    pinged = discord.AllowedMentions(everyone=False, roles=False,
+                                     users=[discord.Object(member.id)], replied_user=True)
+    try:
+        if case["deleted"] or not case["message_id"]:
+            await channel.send(f"<@{member.id}> {text}", allowed_mentions=pinged)
+        else:
+            await channel.send(text, allowed_mentions=pinged,
+                               reference=discord.MessageReference(
+                                   message_id=case["message_id"], channel_id=channel.id,
+                                   fail_if_not_exists=False))
+    except discord.HTTPException as e:
+        log.warning(f"couldn't scold for case {case['no']}: {e!r}")
 
 
 async def _post(guild, member, case, screening):
@@ -235,13 +279,17 @@ async def _post(guild, member, case, screening):
         name="Decided by",
         value=("the first check, which was sure enough to act on its own"
                if case["decided_by"] == judge.FIRST_CHECK
-               else "a second review, because the first check was unsure"),
+               else "a second review, because the first check was unsure or "
+                    "its verdict meant more than a warning"),
     )
     if case["rule"] in judge.HIDDEN_RULES:
         excerpt = "(not repeated here, to avoid spreading it)"
     else:
         excerpt = "||" + discord.utils.escape_markdown(case["excerpt"]) + "||"
     embed.add_field(name="Message", value=excerpt[:1024], inline=False)
+    if case.get("called_admins"):
+        embed.add_field(name="Admins", value="called to decide whether to ban",
+                        inline=False)
     if case.get("problem"):
         embed.add_field(name="Not applied", value=case["problem"], inline=False)
     embed.set_footer(text=f"Think this is wrong? Anyone can appeal it with "
@@ -249,6 +297,32 @@ async def _post(guild, member, case, screening):
     message = await log_channel.send(embed=embed,
                                      allowed_mentions=discord.AllowedMentions.none())
     cases.update(case["no"], log_message_id=message.id)
+
+
+async def _call_admins(guild, member, channel, case):
+    """Ping the Admin role in #admin-log: a case bad enough for a ban,
+    which the bot leaves to them."""
+    role = admins.role(guild)
+    who = role.mention if role is not None else f"<@{guild.owner_id}>"
+    why = ("a severe violation" if case["severity"] == judge.SEVERE
+           else f"a serious violation after {case['record']['timeouts']} timeouts")
+    text = (f"{who} Case {case['no']} needs you: <@{member.id}> broke rule "
+            f"{case['rule']} ({conduct.title(case['rule'])}) in <#{channel.id}>, "
+            f"{why}.\n{case['explanation']}\n"
+            f"They're held in a {cases.label(case).lower()}. The bot doesn't ban: "
+            f"ask me to ban them if they should go, or overturn case {case['no']} "
+            "if it's wrong. It's in #mod-log.")
+    try:
+        log_channel = await admins.log_channel(guild)
+        if log_channel is None:
+            return log.warning(f"case {case['no']} needs the admins, but there's no #admin-log")
+        pinged = (discord.AllowedMentions(everyone=False, users=False, roles=[role])
+                  if role is not None else
+                  discord.AllowedMentions(everyone=False, roles=False,
+                                          users=[discord.Object(guild.owner_id)]))
+        await log_channel.send(text[:2000], allowed_mentions=pinged)
+    except discord.HTTPException as e:
+        log.warning(f"couldn't call the admins about case {case['no']}: {e!r}")
 
 
 async def _support(member):

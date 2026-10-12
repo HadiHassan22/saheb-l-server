@@ -14,6 +14,7 @@ import automod
 import cases
 import conduct
 import judge
+import scold
 import settings
 import store
 
@@ -73,6 +74,29 @@ class FirstCheck(unittest.TestCase):
         self.assertEqual(verdict(2.7, threat=0.91).rule, 3)
         self.assertEqual(verdict(2.7, threat=0.91).severity, "severe")
         self.assertEqual(verdict(0.2, harassment=0.85).severity, "mild")  # never "none"
+
+    def test_insults_and_hate_are_never_severe(self):
+        def verdict(**scores):
+            found = answers(**scores)
+            found["severity"] = {"type": "score", "score": 2.9}
+            return judge.first_check_verdict(judge.screen(found))
+        self.assertEqual(verdict(harassment=0.96).severity, "serious")
+        self.assertEqual(verdict(hate=0.96).severity, "serious")
+        self.assertEqual(verdict(threat=0.96).severity, "severe")
+        reviewed = judge.verdict({"violation": True, "rule": 1, "severity": "severe",
+                                  "explanation": "Insulted a member."})
+        self.assertEqual(reviewed.severity, "serious")
+
+    def test_the_first_check_alone_only_ever_warns(self):
+        v = judge.Verdict(rule=1, severity="serious", explanation="", decided_by="first check")
+        self.assertTrue(judge.stands_alone(v, CLEAN, DEFAULTS))
+        self.assertFalse(judge.stands_alone(v, {"warnings": 1, "timeouts": 0}, DEFAULTS))
+        v.severity = "severe"
+        self.assertFalse(judge.stands_alone(v, CLEAN, DEFAULTS))
+
+    def test_arabic_sexual_swearing_is_not_sexual_content(self):
+        self.assertIn("Arabic swearing", judge.HAZARDS["sexual"][3])
+        self.assertIn("not sexual content", judge.review_prompt("x"))
 
     def test_explanation_prompt_says_the_decision_is_final(self):
         v = judge.Verdict(rule=2, severity="serious", explanation="",
@@ -137,29 +161,38 @@ class SectarianTalk(unittest.TestCase):
 
 
 class Sanctions(unittest.TestCase):
-    def check(self, severity, record, action, minutes=0, delete=None):
+    def check(self, severity, record, action, minutes=0, call=False):
         got = judge.sanction(severity, record, DEFAULTS)
-        self.assertEqual((got.action, got.minutes), (action, minutes))
-        if delete is not None:
-            self.assertEqual(got.delete, delete)
+        self.assertEqual((got.action, got.minutes, got.call_admins), (action, minutes, call))
 
     def test_mild_warns_until_warnings_add_up_to_a_timeout(self):
-        self.check("mild", CLEAN, cases.WARN, delete=False)
+        self.check("mild", CLEAN, cases.WARN)
         self.check("mild", {"warnings": 1, "timeouts": 0}, cases.WARN)
-        self.check("mild", {"warnings": 2, "timeouts": 0}, cases.TIMEOUT, 60, delete=False)
+        self.check("mild", {"warnings": 2, "timeouts": 0}, cases.TIMEOUT, 60)
         self.check("mild", {"warnings": 2, "timeouts": 1}, cases.TIMEOUT, 24 * 60)
 
-    def test_serious_is_a_deleted_warning_first_then_timeouts_then_a_ban(self):
-        self.check("serious", CLEAN, cases.WARN, delete=True)
-        self.check("serious", {"warnings": 1, "timeouts": 0}, cases.TIMEOUT, 60, delete=True)
+    def test_serious_is_a_warning_first_then_timeouts_then_the_admins(self):
+        self.check("serious", CLEAN, cases.WARN)
+        self.check("serious", {"warnings": 1, "timeouts": 0}, cases.TIMEOUT, 60)
         self.check("serious", {"warnings": 0, "timeouts": 1}, cases.TIMEOUT, 24 * 60)
-        self.check("serious", {"warnings": 0, "timeouts": 2}, cases.BAN, delete=True)
+        self.check("serious", {"warnings": 0, "timeouts": 2}, cases.TIMEOUT, 24 * 60,
+                   call=True)
 
     def test_mild_never_bans_however_long_the_record(self):
         self.check("mild", {"warnings": 9, "timeouts": 9}, cases.TIMEOUT, 24 * 60)
 
-    def test_severe_bans_even_a_clean_record(self):
-        self.check("severe", CLEAN, cases.BAN, delete=True)
+    def test_severe_holds_even_a_clean_record_and_calls_the_admins(self):
+        self.check("severe", CLEAN, cases.TIMEOUT, 24 * 60, call=True)
+
+    def test_only_private_information_sexual_content_and_scams_are_deleted(self):
+        self.assertEqual({rule for rule in range(1, 9) if judge.removes(rule)}, {4, 5, 6})
+
+    def test_the_bot_never_bans(self):
+        for severity in judge.SEVERITIES:
+            for n in range(5):
+                record = {"warnings": n, "timeouts": n}
+                self.assertNotEqual(judge.sanction(severity, record, DEFAULTS).action,
+                                    cases.BAN)
 
     def test_settings_move_the_ladder(self):
         s = dict(DEFAULTS, warnings_before_timeout=1, first_timeout_minutes=15)
@@ -197,15 +230,15 @@ class Records(unittest.TestCase):
 
 class AutoModLists(unittest.TestCase):
     def test_keywords_fit_discords_limits(self):
-        for words in (automod.ENGLISH, automod.ARABIC, automod.SECTARIAN,
-                      automod.BLOCK_WORDS):
+        for words in (automod.ENGLISH, automod.ARABIC, automod.ARABIZI_WORDS,
+                      automod.SECTARIAN, automod.BLOCK_WORDS):
             self.assertLessEqual(len(words), 1000)
             self.assertEqual(len(words), len(set(words)), "duplicate keyword")
             for word in words:
                 self.assertLessEqual(len(word), 60, word)
 
     def test_patterns_fit_discords_limits_and_compile(self):
-        for patterns in (automod.ARABIZI, automod.BLOCK_PATTERNS):
+        for patterns in (automod.ARABIZI, automod.ENGLISH_PATTERNS, automod.BLOCK_PATTERNS):
             self.assertLessEqual(len(patterns), 10)
             for pattern in patterns:
                 self.assertLessEqual(len(pattern), 260, pattern)
@@ -218,6 +251,37 @@ class AutoModLists(unittest.TestCase):
             self.assertTrue(any(re.search(p, text) for p in automod.ARABIZI), text)
         for text in ("I love my nike shoes", "Nick is here", "the kalbe"):
             self.assertFalse(any(re.search(p, text) for p in automod.ARABIZI), text)
+
+    def test_lebanese_swearing_and_the_n_word_are_watched(self):
+        patterns = automod.ARABIZI + automod.ENGLISH_PATTERNS
+        def caught(text):
+            return any(re.search(p, text) for p in patterns)
+        for text in ("ayre fik", "AYRAK", "zabre", "zebrak", "zobr", "yel3an abouk",
+                     "nigga", "n1gg3r", "n i g g a", "n.i.g.g.e.r", "NIGGERS"):
+            self.assertTrue(caught(text), text)
+        for text in ("zebra crossing", "air", "error", "Niger", "Nigeria", "bigger",
+                     "snigger", "ayers rock"):
+            self.assertFalse(caught(text), text)
+        for word in ("kessemmak", "sharmoota", "ka7be", "mnayak", "ibn el 7aram"):
+            self.assertIn(word, automod.ARABIZI_WORDS)
+        for word in ("أيري", "زبك", "كسك", "*ديوث*", "نيغا"):
+            self.assertIn(word, automod.ARABIC)
+
+    def test_rules_stay_within_discords_per_server_limits(self):
+        import discord
+        saved, store.DATA_DIR = store.DATA_DIR, Path(tempfile.mkdtemp())
+        try:
+            automod.save_community_words({"added": ["x"], "removed": []})
+            rules = automod.plan()
+        finally:
+            shutil.rmtree(store.DATA_DIR)
+            store.DATA_DIR = saved
+        keyword = [t for _, t, _ in rules
+                   if t.type == discord.AutoModRuleTriggerType.keyword]
+        self.assertLessEqual(len(keyword), 6)
+        for trigger in keyword:
+            self.assertLessEqual(len(trigger.keyword_filter), 1000)
+            self.assertLessEqual(len(trigger.regex_patterns), 10)
 
     def test_phone_numbers_are_blocked_but_prices_are_not(self):
         def blocked(text):
@@ -272,3 +336,28 @@ class Texts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Scolding(unittest.TestCase):
+    CASE = {"no": 12, "action": cases.TIMEOUT, "minutes": 60, "rule": 1,
+            "severity": "serious"}
+
+    def test_the_prompt_says_the_case_is_decided_and_keeps_politics_out(self):
+        prompt = scold.prompt("Flagged message: x", self.CASE)
+        self.assertIn("final and not yours to change", prompt)
+        self.assertIn("timeout (60 minutes)", prompt)
+        self.assertIn("No politics, religion or sect", prompt)
+        self.assertIn("Do not repeat slurs", prompt)
+
+    def test_the_reply_fits_and_carries_the_case(self):
+        text = scold.reply({"reply": "ya 3ayb — " + "x" * 3000}, self.CASE)
+        self.assertLessEqual(len(text), 2000)
+        self.assertNotIn("—", text)
+        self.assertIn("-# Timeout (60 minutes) · case 12 · rule 1", text)
+        self.assertIn("/appeal case:12", text)
+
+    def test_every_stock_line_fits(self):
+        for n in range(len(scold.FALLBACKS)):
+            text = scold.reply(None, dict(self.CASE, no=n))
+            self.assertLessEqual(len(text), 2000)
+            self.assertNotIn("—", text)

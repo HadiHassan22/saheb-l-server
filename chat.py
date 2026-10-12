@@ -1,8 +1,9 @@
-"""#ask-saheb: members talk to the bot in their own words (assistant.py
-decides what it may do). Messages in every other channel are ignored.
+"""Members talk to the bot in their own words (assistant.py decides what
+it may do), in #ask-saheb or any other channel.
 
-It answers only when tagged or replied to, so members can also talk to
-each other in the channel without every message costing an answer.
+It answers only when tagged or replied to, wherever that is, so members
+talk to each other freely without every message costing an answer, and
+the bot never reads what an ordinary message says.
 
 Each member gets a short memory of their own recent exchanges, forgotten
 after half an hour, and a limit on how often they can ask, because every
@@ -181,9 +182,6 @@ async def on_message(message, client=None):
         return
     if message.guild.id != layout.home_id():
         return
-    ask = layout.channel(message.guild, "ask-saheb")
-    if ask is None or message.channel.id != ask.id:
-        return
     me = message.guild.me
     replied = await replied_to(message, me)
     if replied is None and not tagged(message, me):
@@ -227,7 +225,7 @@ async def on_message(message, client=None):
 
 
 @admins.group.command(name="chat-limit",
-                      description="Admins: turn the #ask-saheb limit on or off")
+                      description="Admins: turn the chat limit on or off")
 @app_commands.describe(on=f"On: each member can ask {PER_WINDOW} times in "
                           f"{WINDOW // 60} minutes. Off: no limit.")
 async def chat_limit(interaction: discord.Interaction, on: bool):
@@ -238,8 +236,8 @@ async def chat_limit(interaction: discord.Interaction, on: bool):
     store.save("chat", {"limited": on})
     said = (f"on: each member can ask {PER_WINDOW} times in {WINDOW // 60} minutes"
             if on else "off")
-    await layout.server_log(guild, f"{user.mention} turned the #ask-saheb limit {said}.")
-    await interaction.response.send_message(f"The #ask-saheb limit is {said}.",
+    await layout.server_log(guild, f"{user.mention} turned the chat limit {said}.")
+    await interaction.response.send_message(f"The chat limit is {said}.",
                                             ephemeral=True)
 
 

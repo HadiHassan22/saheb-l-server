@@ -74,9 +74,9 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 
 **Admins.** Members the owner or another admin picks (they have the Admin role; see `/admin list`) look after the server while it's young. They can do anything a vote can, at once and without a vote: they ask the bot and it's done, whether that's channels, roles, settings or the rules, kicking or banning, overturning a moderation case, or having the bot's code changed. The Admin role is the only role with Discord's own powers, so they can also act directly. Everything they do, through the bot or directly, is posted in #server-log with who did it. They also read #admin-log, the bot's reports on code changes, with links.
 
-**Moderation.** The bot doesn't read every message. Discord's AutoMod passes it messages with flagged words in English or Arabic, and it reads the conversation around each one and decides: nothing, a warning, deleting the message, a timeout, or a ban for severe or repeated violations. Every action is posted in {mod_log_mention} with the reasoning.
+**Moderation.** The bot doesn't read every message. Discord's AutoMod passes it messages with flagged words in English or Arabic, and it reads the conversation around each one and decides: nothing, a warning, or a timeout, and scolds you in a reply. Bans are left to the admins. Every action is posted in {mod_log_mention} with the reasoning.
 
-**Talk to the bot.** Ask Saheb l Server anything in {ask_mention}, in English, Arabic or Arabizi. Tag it or reply to one of its messages; it doesn't answer anything else.
+**Talk to the bot.** Ask Saheb l Server anything, in {ask_mention} or any channel, in English, Arabic or Arabizi. Tag it or reply to one of its messages; it answers nothing else.
 - For you, right away: your name color, joining a role, your nickname, an invite link.
 - For everyone, right away: scheduling an event, a temporary voice channel, a thread. Posted in #server-log with who asked.
 - Anything else that affects everyone (channels, roles, pickers in #roles, the questions new members are asked, emojis, stickers and sounds, the rules, removing a member, changing a nickname) it drafts as a proposal, and you file it with a button. Once a vote passes, the bot does it.
@@ -102,7 +102,7 @@ def tutorial_text(ask_mention, proposals_mention):
     words, pointing at the places they need."""
     return "How to use Saheb l Server", f"""Ahla! This is the guide to using me, Saheb l Server. There are no commands to memorize: just talk to me. Write in English, Arabic or Arabizi, whatever is easier.
 
-**Just talk to me in {ask_mention}.** Tag me or reply to one of my messages, and ask me anything. Say hi and have a little chat, or ask about the server: the channels, the roles, what events are coming up, the rules, open proposals, a moderation case, how this place works for new members. You get a plain answer.
+**Just talk to me, in {ask_mention} or any channel.** Tag me or reply to one of my messages, and ask me anything. Say hi and have a little chat, or ask about the server: the channels, the roles, what events are coming up, the rules, open proposals, a moderation case, how this place works for new members. You get a plain answer.
 
 **Things I do for you right away, just ask.** Your name color, joining or leaving a role, your nickname, or an invite link to bring a friend in. It's done the moment you ask, and you can undo it yourself.
 
