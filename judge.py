@@ -371,6 +371,17 @@ def sanction(severity, record, s):
     return Sanction(cases.WARN, 0)
 
 
+def flag_sanction(severity, record, s):
+    """The sanction for a message a member flagged with 🚩: as `sanction`,
+    but a timeout lasts at most `flag_timeout_minutes`. A member's flag
+    starts a short cool-off, never a long one; what is bad enough for more
+    still calls the admins."""
+    found = sanction(severity, record, s)
+    if found.action == cases.TIMEOUT:
+        found.minutes = min(found.minutes, s["flag_timeout_minutes"])
+    return found
+
+
 # The rules whose content must not be quoted back in the public log:
 # private information, sexual content, and scam links.
 HIDDEN_RULES = {4, 5, 6}

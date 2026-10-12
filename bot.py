@@ -24,6 +24,7 @@ import appeals  # noqa: E402
 import chat  # noqa: E402
 import code_changes  # noqa: E402, F401  (each kind of proposal registers itself: kinds.py)
 import colors  # noqa: E402
+import flags  # noqa: E402
 import greetings  # noqa: E402
 import guard  # noqa: E402
 import health  # noqa: E402
@@ -51,10 +52,12 @@ class Bot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         # Privileged: switch it on in the developer portal (Bot -> Message
-        # Content Intent). It lets the moderator read a flagged message and
-        # the few before it, and the bot answer messages that tag it or
-        # reply to it, in any channel. Other messages are never read; the
-        # daily greeting only notices who posted, never what they said.
+        # Content Intent). It lets the moderator read a message AutoMod or a
+        # member's 🚩 flagged and the few before it, and the bot answer
+        # messages that tag it or reply to it, in any channel. Other
+        # messages are never read; the daily greeting only notices who
+        # posted, never what they said. The 🚩 reactions themselves come
+        # with the default intents.
         intents.message_content = True
         # Privileged too (Bot -> Server Members Intent). It lets the bot see
         # who is in the server, so a proposal's quorum counts people and not
@@ -160,6 +163,9 @@ class Bot(discord.Client):
 
     async def on_automod_action(self, execution):
         await moderator.on_automod_action(execution)
+
+    async def on_raw_reaction_add(self, payload):
+        await flags.on_reaction(payload, self)
 
     async def on_message(self, message):
         await greetings.on_message(message)

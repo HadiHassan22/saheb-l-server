@@ -91,6 +91,13 @@ SETTINGS = {
         "label": "How likely a flagged message must look to get a second look",
         "describe": "{}%",
     },
+    # A message a member flags with 🚩 can cost its author at most this
+    # long a timeout, whatever their record (judge.flag_sanction).
+    "flag_timeout_minutes": {
+        "default": 5, "min": 1, "max": 5, "group": MODERATION,
+        "label": "Longest timeout for a message flagged with 🚩",
+        "describe": "{} minutes",
+    },
     # Talk flagged with a sectarian watch word must be this certainly
     # sectarian, political or religious, and at least inflammatory, before
     # the moderator sees it at all (judge.escalates).
