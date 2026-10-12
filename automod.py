@@ -9,7 +9,10 @@ scam link that waits for a verdict has already been clicked.
 
 Discord's limits, checked in tests: a keyword is at most 60 characters and
 a rule holds at most 1000 of them; a regex is at most 260 characters and a
-rule holds at most 10. Keywords match whole words unless wrapped in `*`.
+rule holds at most 10. A server holds at most 6 keyword rules, and the bot
+can already use all 6, so new words join an existing rule rather than
+starting one: a rule takes keywords and patterns together. Discord's
+patterns are Rust regexes: no lookarounds. Keywords match whole words unless wrapped in `*`.
 Arabic prefixes (ال، و، ب) attach to the word, so distinctive Arabic stems
 are wrapped; short or common ones are not, because `*نيك*` also matches
 "تكنيك".
@@ -48,6 +51,17 @@ ENGLISH = [
     "dox", "doxx", "*doxxed*", "terrorist", "go back to", "your kind",
     "you people", "nazi", "jihadi", "infidel", "kafir", "kuffar",
     "nudes", "send nudes", "porn", "*onlyfans*",
+    # The n-word and its spellings. Discord's slur preset blocks the common
+    # ones; these catch the rest, and ENGLISH_PATTERNS the spaced-out ones.
+    "nigger", "niggers", "nigga", "niggas", "niggaz", "niggah", "nigguh",
+    "nigg3r", "n1gger", "n1gga", "n1gg3r", "n1ggas", "nigg@", "niqqa", "niqqer",
+    "niqqas", "nibba", "nibbas", "nibber", "niga", "nigah", "negroes",
+]
+
+# Spellings keywords can't list: letters spaced or dotted out ("n i g g a").
+# Two g's, so Niger and Nigeria are left alone.
+ENGLISH_PATTERNS = [
+    r"(?i)\bn+[\W_]*[i1!|y]+[\W_]*[gq9]+[\W_]*[gq9]+[\W_]*(a+h?|[e3]+[\W_]*r+|uh|az)[\W_]*s?\b",
 ]
 
 ARABIC = [
@@ -61,6 +75,16 @@ ARABIC = [
     "ناصبي", "مجوس", "*مجوسي*", "صليبي", "*صليبيين*", "كافر", "كفار",
     "داعشي", "*دواعش*", "بقتلك", "رح اقتلك", "*اقتلك*", "بدبحك", "*ادبحك*",
     "بدفنك", "بعرف وين ساكن", "بعرف وين بتسكن", "انتحر", "موت يا",
+    # More Lebanese swearing: the forms of اير, زب and كس the stems above
+    # miss, and the insults they leave out.
+    "أير", "أيري", "أيرك", "ايرو", "ايره", "ايرها", "ايرى", "زبك", "زبه",
+    "زبو", "زبها", "كسك", "كسه", "كسو", "كسها", "كسم", "كسامك", "كس أمك",
+    "كس اخت", "*منتاك*", "منيكة", "نيكو", "نيكها", "نيكني", "بنيكك", "بنيكها",
+    "انيكك", "طيزي", "طيزه", "طيزو", "طيزها", "خراء", "كول خرا", "كل خرا",
+    "*شراميط*", "*قحاب*", "*ديوث*", "قواد", "واطي", "ابن الحرام", "ابن حرام",
+    "ابن الكلب", "ابن كلب", "تفو",
+    # The n-word in Arabic letters.
+    "نيجا", "نيغا", "نيقا", "نيغر", "نيقر",
 ]
 
 # Arabic written in Latin letters, with digits for the letters Latin lacks
@@ -74,7 +98,49 @@ ARABIZI = [
     r"(?i)\b(5ara|khara|kalb|kelb|7mar|7mara|7ayawan|7ayawen|jahesh|ja7esh|habal|ahbal|zbele|zbeleh|wa?sa5)\b",
     r"(?i)\b(5[ae]wal|khawal|louti|looti|shaz|rafid[iy]?|rawafed|nawaseb|nasib[iy]|majous|salib[iy]|kafer|3abeed|abeed|dawa3esh|da3eshi)\b",
     r"(?i)(2?e?2tl|2t[ou]?l|a2tl)(ak|ek|ik|kon)\b|\bb?ed?b[ae]7(ak|ek|kon)\b|\bb?e?dfn(ak|ek)\b|ba3ref\s*wen\s*(saken|sakne|btskon)",
-    r"(?i)\by[ie]?l?3an\s*(deen|din|rab+|allah|emm|omm)",
+    r"(?i)\by[ie]?l?3an\s*(deen|din|rab+|allah|emm|omm|ab[ou]+[ky]?|[eo]?kht|e?5t|3ard|sharaf|ebn|ibn)",
+    # اير and زبر with their endings: ayre, ayri, ayrak, eyre, zabre,
+    # zebrak, zobr. Not zebra, error or air.
+    r"(?i)\b(a+y+r+|e+y+r+|za+b+r+|ze+b+r+|zo+b+r+|zi+b+r+|zb+r+)(e+|i+|o+|ou|eh|a+k|e+k|i+k|kon|ha|na)?\b",
+]
+
+# Lebanese swearing in Latin letters that is easier to list than to
+# pattern: joined-up and variant spellings. Watched with ARABIZI.
+ARABIZI_WORDS = [
+    # اير and زب
+    "ayre", "ayri", "ayrak", "ayrik", "ayrek", "ayro", "ayreh", "ayree",
+    "ayre fik", "ayri fik", "ayre feek", "ayri feek", "ayre bi", "ayri bi",
+    "zabre", "zabri", "zabrak", "zebre", "zebri", "zebrak", "zbre", "zobr",
+    "zobre", "zabbre", "zebbre", "zebbe", "zebbak", "zebbi", "zibbi",
+    "zibbak", "zubb", "zob", "zeb", "zebi", "zebak",
+    # كس
+    "kess", "kos", "koss", "kessemmak", "kesemmak", "kesemak", "kesmak",
+    "kessmak", "kosomak", "kosommak", "kossomak", "kosomk", "ksomak", "ksmk",
+    "kesekhtak", "kese5tak", "koskhtak", "kes emmak", "kos emmak", "kes emak",
+    "kos omak", "kes ommak", "kes ekhtak", "kes e5tak", "kes 5altak",
+    # نيك and منيوك
+    "nayek", "naykak", "nayki", "naykek", "nekak", "nektak", "neekak", "nikak",
+    "nikik", "niktak", "bnikak", "bnekak", "benekak", "nayekak", "mnayak",
+    "mnayek", "mnayik", "mnayke", "mnaykeen", "manyak", "manyok", "manyouk",
+    "manyouke", "manayek", "metnak", "metnake", "mitnak", "mitnek", "mntak",
+    # شرموطة and قحبة
+    "sharmouta", "sharmoota", "sharmuta", "sharmout", "sharmoot", "shrmota",
+    "charmouta", "charmoota", "charmuta", "sharameet", "a7be", "a7ba", "2a7be",
+    "2a7ba", "ka7be", "ka7ba", "qa7ba", "qa7be", "kahbe", "kahba", "qahba",
+    # عرص, طيز and خرا
+    "3arse", "3arsa", "3arseh", "3rse", "3arss", "m3arras", "m3arrase", "teez", "teezak", "tizak", "tizzak", "tizik", "teezik", "tizi",
+    "teezi", "khara", "kharyan", "5aryan", "kharya", "5arye", "kol khara",
+    "kol 5ara", "ekol khara", "akol 5ara", "kel khara", "kel 5ara",
+    # حمار, جحش, حيوان, حقير, واطي, ديوث, ابن الحرام
+    "hmar", "himar", "7imar", "hmara", "jahsh", "ja7sh", "je7sh", "hayawan",
+    "hayawen", "7aywan", "haywan", "7aywen", "7a2ir", "ha2ir", "7a2eer",
+    "haqir", "wate", "wati", "wa6e", "wa6i", "dayouth", "dayyouth", "dayous",
+    "dayyous", "ibn el 7aram", "ebn el 7aram", "ibn 7aram", "ebn 7aram",
+    "ibn el haram", "ebn el haram", "ibn el kalb", "ebn el kalb", "ibn kalb",
+    "ya kalb", "ya kelb",
+    # يلعن
+    "yel3an abouk", "yil3an abouk", "yel3an ebn", "yel3an 3ardak",
+    "yel3an sharafak", "yel3an ekhtak", "yl3n",
 ]
 
 # Sect and community slurs, inflammatory political slogans and religious
@@ -148,7 +214,8 @@ def plan():
     removed = set(words["removed"])
     rules = [
         (PREFIX + "watch English", discord.AutoModTrigger(
-            type=T.keyword, keyword_filter=[w for w in ENGLISH if w not in removed]), False),
+            type=T.keyword, keyword_filter=[w for w in ENGLISH if w not in removed],
+            regex_patterns=ENGLISH_PATTERNS), False),
         (PREFIX + "watch Arabic", discord.AutoModTrigger(
             type=T.keyword, keyword_filter=[w for w in ARABIC if w not in removed]), False),
     ]
@@ -156,8 +223,9 @@ def plan():
         rules.append((PREFIX + "watch words added by vote", discord.AutoModTrigger(
             type=T.keyword, keyword_filter=words["added"][:1000]), False))
     return rules + [
-        (PREFIX + "watch Arabizi",
-         discord.AutoModTrigger(type=T.keyword, regex_patterns=ARABIZI), False),
+        (PREFIX + "watch Arabizi", discord.AutoModTrigger(
+            type=T.keyword, keyword_filter=[w for w in ARABIZI_WORDS if w not in removed],
+            regex_patterns=ARABIZI), False),
         (PREFIX + "watch sectarian talk", discord.AutoModTrigger(
             type=T.keyword, keyword_filter=sectarian_words()), False),
         (PREFIX + "block scams and phone numbers",

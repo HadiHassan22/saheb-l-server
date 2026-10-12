@@ -5,6 +5,7 @@ Discord objects and fake AI answers. No network and no Discord server.
 """
 
 import shutil
+from datetime import timedelta
 import tempfile
 import time
 import types
@@ -14,10 +15,12 @@ from unittest import mock
 
 import discord
 
+import admins
 import ai
 import cases
 import layout
 import moderator
+import scold
 import store
 
 OWNER, BOT_ROLE, MEMBER_ROLE = 1, 10, 0
@@ -40,6 +43,12 @@ class Channel(Sent):
         self.id = 50
         self._history = history
         self.deleted = []
+        self.references = []
+
+    async def send(self, content=None, reference=None, **kwargs):
+        if reference is not None:
+            self.references.append(reference.message_id)
+        return await super().send(content, **kwargs)
 
     def history(self, limit, before=None):
         async def messages():
@@ -98,14 +107,21 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         store.DATA_DIR = Path(self._tmp)
         self.log = Sent()
         self.politics = None
+        self.admin_log = Sent()
         self.patches = [
             mock.patch.object(layout, "channel", self.channel_of),
             mock.patch.object(ai, "review", self.fake_review),
+            mock.patch.object(admins, "log_channel",
+                              mock.AsyncMock(return_value=self.admin_log)),
+            mock.patch.object(admins, "role", mock.Mock(
+                return_value=types.SimpleNamespace(id=5, mention="<@&5>"))),
         ]
         for p in self.patches:
             p.start()
         self.reviews = []
         self.review_answer = {}
+        self.scolds = []
+        self.scold_answer = {"reply": "3ayb ya karim, behave!"}
 
     def channel_of(self, guild, name):
         return self.log if name == "mod-log" else self.politics
@@ -123,6 +139,9 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self._tmp)
 
     async def fake_review(self, prompt, schema):
+        if schema is scold.SCHEMA:
+            self.scolds.append(prompt)
+            return self.scold_answer
         self.reviews.append(prompt)
         return self.review_answer
 
@@ -146,8 +165,11 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         case = cases.get(1)
         self.assertEqual((case["action"], case["rule"], case["severity"], case["decided_by"]),
                          (cases.WARN, 1, "serious", "first check"))
-        self.assertTrue(case["deleted"])
-        self.assertEqual(channel.deleted, [123])
+        self.assertFalse(case["deleted"])
+        self.assertEqual(channel.deleted, [])  # it stays up, and gets scolded
+        self.assertEqual(channel.sent[0],
+                         "3ayb ya karim, behave!\n-# " + scold.footer(case))
+        self.assertEqual(channel.references, [123])
         self.assertIn("Karim insulted Rami", member.sent[0])
         self.assertEqual(self.log.sent[0].description, case["explanation"])
 
@@ -169,28 +191,79 @@ class Flow(unittest.IsolatedAsyncioTestCase):
                              member=Member(member_id=8))
         self.assertEqual(cases.get(1)["decided_by"], "review")
 
-    async def test_the_record_escalates_to_a_timeout_then_a_ban(self):
-        self.review_answer = {"explanation": "Insulted a member."}
+    async def test_the_record_escalates_to_calling_the_admins_never_a_ban(self):
+        self.review_answer = {"violation": True, "rule": 1, "severity": "serious",
+                              "explanation": "Insulted a member."}
         member = Member()
         for _ in range(2):
             cases.open_case(int(time.time()) - 60, user_id=member.id,
                             action=cases.TIMEOUT, minutes=60)
         with mock.patch.object(moderator, "COOLDOWN", 0):
             await self.run_alert(jev(1.8, harassment=0.96), member=member)
-        self.assertEqual(cases.get(3)["action"], cases.BAN)
+        case = cases.get(3)
+        self.assertEqual((case["action"], case["minutes"], case["called_admins"]),
+                         (cases.TIMEOUT, 24 * 60, True))
+        self.assertEqual(case["decided_by"], "review")
+        self.assertEqual(member.timed_out, timedelta(hours=24))
+        self.assertIn("<@&5> Case 3 needs you", self.admin_log.sent[0])
+        self.assertIn("after 2 timeouts", self.admin_log.sent[0])
 
-    async def test_a_severe_threat_bans_and_is_messaged_before_the_ban(self):
-        self.review_answer = {"explanation": "Threatened a member's home."}
-        member, _ = await self.run_alert(jev(2.8, threat=0.91),
-                                         content="I know which building you live in")
-        self.assertEqual(cases.get(1)["action"], cases.BAN)
-        self.assertIn("Ban", member.sent[0])
+    async def test_a_timeout_or_ban_is_never_the_first_checks_alone(self):
+        member = Member()
+        cases.open_case(int(time.time()) - 60, user_id=member.id,
+                        action=cases.WARN, minutes=0)
+        self.review_answer = {"violation": False, "rule": 0, "severity": "none",
+                              "explanation": ""}
+        with mock.patch.object(moderator, "COOLDOWN", 0):
+            await self.run_alert(jev(1.8, harassment=0.96), member=member)
+        self.assertEqual(len(self.reviews), 1)
+        self.assertNotIn("not yours to review", self.reviews[0])
+        self.assertIsNone(cases.get(2))
+        self.assertEqual(member.sent, [])
+
+    async def test_a_severe_threat_holds_the_member_and_calls_the_admins(self):
+        self.review_answer = {"violation": True, "rule": 3, "severity": "severe",
+                              "explanation": "Threatened a member's home."}
+        member, channel = await self.run_alert(jev(2.8, threat=0.91),
+                                               content="I know which building you live in")
+        case = cases.get(1)
+        self.assertEqual((case["action"], case["called_admins"]), (cases.TIMEOUT, True))
+        self.assertEqual(channel.deleted, [])
+        self.assertEqual(member.timed_out, timedelta(hours=24))
+        self.assertIn("asked to look at it", member.sent[0])
+        self.assertIn("a severe violation", self.admin_log.sent[0])
+        fields = {f.name: f.value for f in self.log.sent[0].fields}
+        self.assertIn("called to decide", fields["Admins"])
+
+    async def test_a_plain_warning_calls_nobody(self):
+        self.review_answer = {"explanation": "Insulted a member."}
+        await self.run_alert(jev(1.8, harassment=0.96))
+        self.assertFalse(cases.get(1)["called_admins"])
+        self.assertEqual(self.admin_log.sent, [])
 
     async def test_private_information_is_not_quoted_in_the_log(self):
-        self.review_answer = {"explanation": "Posted a member's phone number."}
+        self.review_answer = {"violation": True, "rule": 4, "severity": "severe",
+                              "explanation": "Posted a member's phone number."}
         await self.run_alert(jev(2.8, doxxing=0.95), content="her number is 03 123456")
         fields = {f.name: f.value for f in self.log.sent[0].fields}
         self.assertNotIn("123456", fields["Message"])
+
+    async def test_private_information_is_deleted_and_scolded_in_the_channel(self):
+        self.review_answer = {"violation": True, "rule": 4, "severity": "severe",
+                              "explanation": "Posted a member's phone number."}
+        _, channel = await self.run_alert(jev(2.8, doxxing=0.95),
+                                          content="her number is 03 123456")
+        self.assertTrue(cases.get(1)["deleted"])
+        self.assertEqual(channel.deleted, [123])
+        self.assertEqual(channel.references, [])  # nothing left to reply to
+        self.assertTrue(channel.sent[0].startswith("<@7> 3ayb"))
+        self.assertIn("Do not mention or hint at what the message said", self.scolds[0])
+
+    async def test_a_scolding_that_cant_be_written_gets_a_stock_line(self):
+        self.review_answer = {"explanation": "Insulted a member."}
+        self.scold_answer = {}
+        _, channel = await self.run_alert(jev(1.8, harassment=0.96))
+        self.assertTrue(channel.sent[0].startswith(scold.FALLBACKS[1]))
 
     async def test_members_above_the_bot_are_logged_but_not_touched(self):
         self.review_answer = {"explanation": "Insulted a member."}
@@ -265,8 +338,8 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         case = cases.get(1)
         self.assertEqual((case["action"], case["rule"], case["severity"]),
                          (cases.WARN, 2, "serious"))
-        self.assertTrue(case["deleted"])
-        self.assertEqual(channel.deleted, [123])
+        self.assertFalse(case["deleted"])
+        self.assertEqual(channel.deleted, [])
         self.assertIn("Attacked a community", case["explanation"])
         self.assertIn("Attacked a community", self.log.sent[0].description)
 

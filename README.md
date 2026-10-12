@@ -41,13 +41,15 @@ reports on code changes, with links.
 
 **Moderation.** The bot doesn't read every message. Discord's AutoMod
 passes it messages with flagged words in English or Arabic, and it reads
-the conversation around each one and decides: nothing, a warning,
-deleting the message, a timeout, or a ban for severe or repeated
-violations. Every action is posted in `#mod-log` with the
+the conversation around each one and decides: nothing, a warning, or a
+timeout. Instead of deleting the message, Saheb replies to it with a
+telling-off. It never bans: severe or repeated violations are passed to
+the admins, who decide. Every action is posted in `#mod-log` with the
 reasoning.
 
-**Talk to the bot.** Ask Saheb l Server anything in `#ask-saheb`, in
-English, Arabic or Arabizi: tag it or reply to one of its messages, with an
+**Talk to the bot.** Ask Saheb l Server anything, in `#ask-saheb` or any
+other channel, in English, Arabic or Arabizi: tag it or reply to one of
+its messages, with an
 image attached if you want it to see one. It
 changes your name color when you ask (or
 pick one in `#roles`), answers questions about the server, and drafts
@@ -154,16 +156,17 @@ All of this is written up for members in the tutorial the bot posts in
 `#guide`, warm and simple, with a little Lebanese Arabic where it fits.
 New members see that channel from the moment they join.
 
-In `#ask-saheb`, members talk to Saheb l Server in their own words, and it
+In `#ask-saheb`, or anywhere else they tag it or reply to it, members
+talk to Saheb l Server in their own words, and it
 answers in the language they use, never using an em dash. It has a
 character: proud to be the algorithm that keeps everyone equal, Lebanese,
 anti-Israel and a bit communist, with a dry joke about bosses, banks and
 sectarian leaders. The politics are flavour, a line when it fits: they
 never change how it treats a member or a request, and they stay out of
 moderation, whose questions are the same for everyone (`judge.py`). It answers only
-messages that tag it or reply to it, so members can also talk to each
-other there. It is the only channel where the bot reads what ordinary
-messages say. If such a message has an image attached, the bot can see it too
+messages that tag it or reply to it, in any channel, so members talk to
+each other freely; those are the only ordinary messages whose words the
+bot reads. If such a message has an image attached, the bot can see it too
 (up to 3 images, 5 MB each) and use what's in it, for example drafting an
 emoji, a sticker or the server's icon straight from the attachment. A sound
 file attached the same way can become a sound on the soundboard (see
@@ -273,9 +276,10 @@ Almost everything runs without one. What can't:
 - **Keys.** The Discord token, the API keys and the GitHub secret, set
   once, and replaced if one ever leaks. The Discord developer portal
   settings.
-- **The law and Discord.** The bot deletes illegal content and bans
-  whoever posted it, but reporting it to Discord or the authorities, and
-  answering Discord's own warnings, is a person's job.
+- **The law and Discord.** The bot deletes illegal content, times out
+  whoever posted it and calls the admins, who decide whether to ban.
+  Reporting it to Discord or the authorities, and answering Discord's own
+  warnings, is a person's job.
 - **Recovery.** If the bot is down or broken past the automatic rollback,
   banned by Discord, or has lost its data, only the owner can step in.
 - **The protected core** ([PROTECTED.md](PROTECTED.md)), by design.
@@ -361,7 +365,9 @@ AutoMod is the net, and the bot is the judge:
 
 1. **AutoMod flags.** Broad watch lists in English, Arabic script and
    Arabizi (Arabic in Latin letters and digits) send matches to the bot
-   without removing anything. A few things are blocked immediately and
+   without removing anything. They cover the many spellings of Lebanese
+   swearing (ayre, zabre, kess, sharmouta and the rest) and of the n-word,
+   spaced-out ones included. A few things are blocked immediately and
    then judged: scam lures, Lebanese phone numbers, slurs, sexual content,
    mass mentions and spam.
 2. **Sectarian talk stays in its channel.** A narrow watch list of sect
@@ -379,20 +385,37 @@ AutoMod is the net, and the bot is the judge:
    how severe it is. It costs about $0.00002 a message, which is why the
    watch lists can afford to be broad.
 4. **Routing, by Jev's highest score:**
-   - **80% or more:** Jev's verdict stands. Claude Haiku writes the public
-     explanation of the decision but cannot overrule it.
+   - **80% or more:** Jev's verdict stands if it means a warning. Claude
+     Haiku writes the public explanation of the decision but cannot
+     overrule it. If it would mean a timeout, Haiku reviews it instead,
+     as below: Jev alone never takes anyone out of the conversation.
    - **30% to 80%, or the message talks to the moderator:** Jev is unsure,
-     so Haiku reviews the conversation and decides.
+     so Haiku reviews the conversation and decides. When Haiku is unsure,
+     it is not a violation. Lebanese swearing built on sexual words is
+     swearing, not sexual content, for both judges.
    - **Under 30%:** cleared. Nothing happens and nothing is posted.
 5. **The sanction is picked in code**, never by a model, from the severity
    and the member's record over the last 30 days:
    - mild: a warning; after 3 warnings, a timeout
-   - serious: a warning with the message deleted; with any record, a
-     timeout (60 minutes first, 24 hours after that); after 2 timeouts, a
-     ban
-   - severe (threats, doxxing, anything sexual involving minors, scams): a
-     ban
-6. **Everything is public.** The member gets a DM, and `#mod-log` gets the
+   - serious: a warning; with any record, a timeout (60 minutes first, 24
+     hours after that); after 2 timeouts, the admins are called
+   - severe (threats, doxxing, anything sexual involving minors, scams):
+     the admins are called. Insults and hate are never severe, whichever
+     judge decides.
+
+   **The bot never bans.** When the admins are called, the member is held
+   in a timeout (24 hours, the later timeout length) and the Admin role
+   is pinged in `#admin-log` with the case. An admin decides: they can ask
+   the bot to ban the member, or overturn the case.
+6. **Saheb scolds instead of deleting.** The flagged message stays up, and
+   Saheb replies to it with a short, playful telling-off in its own voice,
+   like a Lebanese uncle at a family lunch, with the case, the rule and
+   how to appeal underneath in small text. The reply is written after the
+   decision and can't change it, and it keeps politics and religion out
+   (`scold.py`). Private information, sexual content and scams are the
+   exception: they are deleted, and Saheb scolds the member in the
+   channel instead.
+7. **Everything is public.** The member gets a DM, and `#mod-log` gets the
    case: the rule, the explanation, the member's record, Jev's score, and
    which judge decided. The flagged message is quoted behind a spoiler,
    except for private information, sexual content and scam links, which
@@ -415,7 +438,7 @@ Every number above is a setting the community can change by vote:
 | Warnings before a timeout | 3 | 1 to 10 |
 | Length of a first timeout | 60 minutes | 10 to 1440 minutes |
 | Length of each later timeout | 24 hours | 1 to 168 hours |
-| Timeouts before a ban | 2 | 1 to 10 |
+| Timeouts before the admins are called | 2 | 1 to 10 |
 | How sure the first check must be to act alone | 80% | 50% to 99% |
 | How likely a message must look to get a second look | 30% | 10% to 90% |
 | How sure the sectarian talk check must be to pass a message on | 80% | 50% to 99% |
@@ -429,8 +452,8 @@ Known limits:
   Server, which includes the owner. The bot can't change that.
 - The bot can only act on members whose highest role is below its own.
 - Anything AutoMod doesn't flag is never seen. The watch lists are in
-  `automod.py`. That includes `#ask-saheb`: the bot reads messages there
-  to answer them, not to moderate them.
+  `automod.py`. That includes messages that tag the bot or reply to it:
+  it reads them to answer them, not to moderate them.
 
 To check how the first check scores a set of example messages with the
 current dials, run `calibrate.py` (see [Running it](#running-it)).
@@ -529,7 +552,7 @@ one changed, and is told why it wasn't kept.
 | File | What it does |
 | --- | --- |
 | `bot.py` | Entrypoint: connects, picks the home server, loads everything |
-| `chat.py` | `#ask-saheb`: rate limits, memory, and the File it and Ship it buttons |
+| `chat.py` | Talking to the bot anywhere it's tagged: rate limits, memory, and the File it and Ship it buttons |
 | `greetings.py` | The daily "ija el batal" greeting in one channel |
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
@@ -556,6 +579,7 @@ one changed, and is told why it wasn't kept.
 | `banter.py` | The banter check a member's proposal passes before it opens; no Discord |
 | `judge.py` | The questions, routing, verdicts and sanction ladder; no Discord |
 | `moderator.py` | Handles AutoMod alerts, applies sanctions, posts cases; `/ai-key` |
+| `scold.py` | Saheb's telling-off reply to a message the moderator acted on; no Discord |
 | `cases.py` | Numbered moderation cases and each member's record |
 | `appeals.py` | `/appeal`, the Appeal button, and the appeal kind of proposal |
 | `ai.py` | The OpenRouter key, the two model calls, and the monthly budget (protected) |

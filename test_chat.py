@@ -530,20 +530,21 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t["role"] for t in chat.history(5, NOW + 60)], ["user", "model"])
         self.assertEqual(chat.history(5, NOW + chat.MEMORY_TTL + 1), [])
 
-    async def say(self, content, mentions=(), roles=(), reply_to=None):
-        """Post `content` in #ask-saheb and return what the bot answered, or
-        None if it stayed quiet."""
+    async def say(self, content, mentions=(), roles=(), reply_to=None, channel_id=5):
+        """Post `content` in a channel (#ask-saheb unless `channel_id` says
+        otherwise) and return what the bot answered, or None if it stayed
+        quiet."""
         role = mock.Mock(spec=discord.Role, id=600)
         role.is_bot_managed.return_value = True
         me = types.SimpleNamespace(id=500, roles=[role])
-        ask = types.SimpleNamespace(id=5, typing=contextlib.nullcontext,
+        here = types.SimpleNamespace(id=channel_id, typing=contextlib.nullcontext,
                                     fetch_message=mock.AsyncMock(return_value=reply_to))
         reference = None
         if reply_to is not None:
             reference = types.SimpleNamespace(message_id=reply_to.id, resolved=None,
                                               cached_message=None)
         message = types.SimpleNamespace(
-            content=content, attachments=[], reference=reference, channel=ask,
+            content=content, attachments=[], reference=reference, channel=here,
             author=types.SimpleNamespace(id=7, bot=False, display_name="Rami"),
             guild=types.SimpleNamespace(id=99, me=me, owner_id=1),
             mentions=[me if m == "me" else m for m in mentions],
@@ -551,7 +552,8 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
             reply=mock.AsyncMock())
         respond = mock.AsyncMock(return_value="Hi Rami")
         with mock.patch.object(layout, "home_id", lambda: 99), \
-                mock.patch.object(layout, "channel", lambda g, name: ask), \
+                mock.patch.object(layout, "channel",
+                                  lambda g, name: types.SimpleNamespace(id=5)), \
                 mock.patch.object(assistant, "respond", respond):
             await chat.on_message(message)
         if not respond.await_count:
@@ -574,6 +576,15 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         text = await self.say("and to pass?", reply_to=mine)
         self.assertIn("and to pass?", text)
         self.assertIn("The quorum is 5.", text)
+
+    async def test_it_answers_in_any_channel_but_only_when_tagged(self):
+        general = 6
+        self.assertIsNone(await self.say("anyone here?", channel_id=general))
+        self.assertEqual(await self.say("<@500> 3ayb!", mentions=["me"], channel_id=general),
+                         "3ayb!")
+        mine = mock.Mock(spec=discord.Message, id=72, content="Behave, ya habibi.",
+                         author=types.SimpleNamespace(id=500))
+        self.assertIn("sorry", await self.say("sorry", reply_to=mine, channel_id=general))
 
     async def press(self, draft_no, user_id):
         sent = []

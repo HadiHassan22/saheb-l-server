@@ -69,9 +69,12 @@ SETTINGS = {
         "label": "Length of each later timeout",
         "describe": "{} hours",
     },
+    # The bot never bans: after this many timeouts, a serious violation
+    # calls the admins to decide instead (judge.sanction). The name stays
+    # so votes already cast on it still apply.
     "timeouts_before_ban": {
         "default": 2, "min": 1, "max": 10, "group": MODERATION,
-        "label": "Timeouts before a ban, except for severe violations",
+        "label": "Timeouts before the admins are called",
         "describe": "{} timeouts",
     },
     # The two strictness dials. Every flagged message gets a fast first

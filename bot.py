@@ -52,9 +52,9 @@ class Bot(discord.Client):
         intents = discord.Intents.default()
         # Privileged: switch it on in the developer portal (Bot -> Message
         # Content Intent). It lets the moderator read a flagged message and
-        # the few before it, and the bot answer in #ask-saheb. Messages
-        # anywhere else are never read; the daily greeting only notices who
-        # posted, never what they said.
+        # the few before it, and the bot answer messages that tag it or
+        # reply to it, in any channel. Other messages are never read; the
+        # daily greeting only notices who posted, never what they said.
         intents.message_content = True
         # Privileged too (Bot -> Server Members Intent). It lets the bot see
         # who is in the server, so a proposal's quorum counts people and not
