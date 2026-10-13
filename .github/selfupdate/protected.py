@@ -16,7 +16,8 @@ import subprocess
 import sys
 
 PROTECTED_PATHS = (".github/", "PROTECTED.md", "ai.py", "store.py", "health.py",
-                   "guard.py", "admins.py", "workflow.py", "railway.json", "railpack.json",
+                   "guard.py", "admins.py", "workflow.py", "remote.py", "railway.json",
+                   "railpack.json",
                    # Claude Code reads these by itself on every run, so a change
                    # here would instruct every later self-update.
                    "CLAUDE.md", "CLAUDE.local.md", ".claude/", ".agents/", ".mcp.json")
@@ -45,7 +46,10 @@ FLOOR_HAZARDS = ("doxxing", "sexual", "scam")
 ACCESS = re.compile(
     r"os\.environ|os\.getenv|getenv\(|environ\[|DISCORD_TOKEN|OPENROUTER_API_KEY"
     r"|ANTHROPIC_API_KEY|\bai\.key\b|\bai\._secrets\b|\bworkflow\._token\b"
-    r"|store\.load\(\s*['\"](ai|github)['\"]|(ai|github)\.json|\.http\.token"
+    r"|store\.load\(\s*['\"](ai|github|remote)['\"]|(ai|github|remote)\.json|\.http\.token"
+    # Remote control drives a browser on the owner's machine: only
+    # remote.py, which checks who asked, may reach it.
+    r"|\bremote\.(_\w+|run|check|Confirm|KeyForm)\b"
     r"|\beval\(|\bexec\(|subprocess|__import__|importlib|/proc/|os\.system|os\.popen")
 # Added lines that name the stored list of admins, which only admins.py
 # (and so only the owner, with /admin) may change.
@@ -58,7 +62,8 @@ GITHUB_LINK = re.compile(r"(?<!api\.)github\.com|html_url")
 # discarded, never published.
 SECRET = re.compile(
     r"sk-ant-[\w-]{10,}|sk-or-v1-[\w-]{10,}|gh[opsu]_[A-Za-z0-9]{20,}"
-    r"|github_pat_\w{20,}|[MN][A-Za-z\d]{23,27}\.[\w-]{6}\.[\w-]{27,}")
+    r"|github_pat_\w{20,}|[MN][A-Za-z\d]{23,27}\.[\w-]{6}\.[\w-]{27,}"
+    r"|\bal_[A-Za-z0-9]{16,}_[\w-]{20,}")
 
 
 def path_problems(changed):

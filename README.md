@@ -590,7 +590,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 38 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 39 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |
@@ -598,6 +598,7 @@ one changed, and is told why it wasn't kept.
 | `health.py` | `/healthz` and `/api/passed`, which the update system relies on (protected) |
 | `updates.py` | Follows passed proposals through GitHub, starts the workflow, and reports in `#proposals` and `#admin-log` |
 | `workflow.py` | The GitHub token, `/github-key`, and starting the workflow (protected) |
+| `remote.py` | Remote control for admins: Saheb doing what a bot can't in Discord's own app, `/remote-control` and `/remote-key` (protected) |
 | `PROTECTED.md` | What votes can't change (protected) |
 | `.github/` | The self-update workflow, its protected-core check and security review (protected) |
 | `layout.py` | Builds and repairs the server; knows where each channel is |

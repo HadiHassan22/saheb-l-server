@@ -33,6 +33,7 @@ import moderator  # noqa: E402
 import onboarding  # noqa: E402
 import pickers  # noqa: E402
 import quick  # noqa: E402
+import remote  # noqa: E402
 import setting_changes  # noqa: E402, F401
 import updates  # noqa: E402
 import voting_ui  # noqa: E402
@@ -74,6 +75,7 @@ class Bot(discord.Client):
         admins.setup(self.tree)
         moderator.setup(self.tree)
         workflow.setup(self.tree)
+        remote.setup(self.tree)
         appeals.setup(self, self.tree)
         colors.setup(self, self.tree)
         pickers.setup(self)

@@ -17,6 +17,7 @@ in the repository's history.
 | `guard.py` | Takes moderation-level permissions off every role and channel override except the Admin role, so nobody but the admins can act on the server except through the bot. |
 | `admins.py` | Who the admins are, and that only the owner and the admins pick them. It keeps the Admin role, the one role with Discord's powers, on the admins alone, and posts what admins do with Discord's own tools in `#server-log`. No other file may touch the stored list of admins. It also keeps `#admin-log` readable by the admins and the owner alone, checked before every post. |
 | `workflow.py` | The GitHub token the owner gives with `/github-key`, which lets the bot start the self-update workflow. No other file may read it. |
+| `remote.py` | Remote control: a browser agent on the owner's own machine, which Saheb uses for what a bot can't do. Only admins can start it, a request made in chat waits for the admin who asked to press Run it, and the relay's address and key (set with `/remote-key`) are read here and nowhere else. |
 | `railway.json`, `railpack.json` | How the bot is deployed and health-checked. |
 | `CLAUDE.md`, `CLAUDE.local.md`, `.claude/`, `.agents/`, `.mcp.json` | Claude Code reads these by itself on every self-update run. A change here would instruct every later run. |
 
@@ -69,7 +70,7 @@ protected channels; the safety floor and rules 4 to 6 hold for everyone.
   get links in `#admin-log`, which only they and the owner can read.
 
 - Read, print, store or send any key or token: the Discord token, the AI
-  key, the GitHub token, or any other secret. New code may not read environment variables
+  key, the GitHub token, the remote-control key, or any other secret. New code may not read environment variables
   at all.
 - Run code it builds at runtime (`eval`, `exec`, `subprocess`, dynamic
   imports).
