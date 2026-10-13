@@ -12,6 +12,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import discord
+
 import actions
 import appeals
 import cards
@@ -32,20 +34,33 @@ VETERAN = NOW - 30 * DAY
 ADMIN = 7
 
 
-class Card:
-    """A posted proposal card."""
+class Message:
+    """A posted card in #votes, or record in #proposals."""
 
-    def __init__(self):
-        self.id = 60
-        self.jump_url = "https://discord.com/channels/99/6/60"
-        self.edits, self.replies = [], []
-        self.create_thread = mock.AsyncMock()
+    def __init__(self, id):
+        self.id = id
+        self.jump_url = f"https://discord.com/channels/99/6/{id}"
+        self.edits, self.deleted = [], False
 
     async def edit(self, **kwargs):
         self.edits.append(kwargs)
 
-    async def reply(self, text, **kwargs):
-        self.replies.append(text)
+    async def delete(self):
+        self.deleted = True
+
+
+class Thread:
+    """A proposal's thread under its card."""
+
+    def __init__(self):
+        self.id = 61
+        self.said, self.archived = [], False
+
+    async def send(self, text, **kwargs):
+        self.said.append(text)
+
+    async def edit(self, archived=False):
+        self.archived = archived
 
 
 class Ending(unittest.IsolatedAsyncioTestCase):
@@ -53,20 +68,28 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         self._saved_dir = store.DATA_DIR
         self._tmp = tempfile.mkdtemp()
         store.DATA_DIR = Path(self._tmp)
-        self.card = Card()
-        self.channel = types.SimpleNamespace(
+        self.card, self.record = Message(60), Message(70)
+        self.votes = types.SimpleNamespace(
             id=6, send=mock.AsyncMock(return_value=self.card),
             fetch_message=mock.AsyncMock(return_value=self.card))
+        self.records = types.SimpleNamespace(
+            id=5, send=mock.AsyncMock(return_value=self.record),
+            fetch_message=mock.AsyncMock(return_value=self.record))
+        self.thread = Thread()
+        self.channels = {6: self.votes, 5: self.records, 61: self.thread}
         self.guild = object()
-        self.client = types.SimpleNamespace(get_channel=lambda cid: self.channel,
-                                            get_guild=lambda gid: self.guild)
+        self.client = types.SimpleNamespace(
+            get_channel=self.channels.get, get_guild=lambda gid: self.guild,
+            fetch_channel=mock.AsyncMock(side_effect=discord.NotFound(mock.Mock(), "")))
         self.logged = []
 
         async def server_log(guild, text):
             self.logged.append(text)
 
         self.patches = [
-            mock.patch.object(layout, "channel", lambda guild, name: self.channel),
+            mock.patch.object(layout, "channel",
+                              lambda guild, name: self.records if name == "proposals"
+                              else self.votes),
             mock.patch.object(layout, "server_log", server_log),
             mock.patch.object(layout, "post_texts", mock.AsyncMock()),
         ]
@@ -80,8 +103,16 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self._tmp)
 
     def posted(self, p):
-        """As if `p` had been put to a vote: its card is up."""
-        return proposals.attach_message(p["no"], self.channel.id, self.card.id)
+        """As if `p` had been put to a vote: its card is up in #votes, with
+        its thread."""
+        proposals.attach_message(p["no"], self.votes.id, self.card.id)
+        return proposals.record(p["no"], thread_id=self.thread.id)
+
+    def shown(self):
+        """What the record in #proposals says now."""
+        embed = (self.record.edits[-1]["embed"] if self.record.edits
+                 else self.records.send.call_args.kwargs["embed"])
+        return embed.description
 
     def vote(self, no, yes=0, no_votes=0):
         for voter in range(10, 10 + yes):
@@ -89,16 +120,19 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         for voter in range(50, 50 + no_votes):
             proposals.cast(no, voter, VETERAN, "no", NOW + 60)
 
-    async def test_a_passed_vote_is_carried_out_and_its_result_said_under_the_card(self):
+    async def test_a_passed_vote_is_carried_out_and_recorded_in_proposals(self):
         p = self.posted(setting_changes.KIND.open(1, "voting_hours", 48, "", NOW))
         self.vote(p["no"], yes=5)
         p = await ending.close(self.client, p["no"], NOW + DAY)
         self.assertEqual(settings.current()["voting_hours"], 48)
         self.assertEqual(p["outcome"], "Voting window is now 48 hours.")
-        self.assertIsNone(self.card.edits[0]["view"])  # the vote buttons go
-        self.assertEqual(self.card.edits[-1]["embed"].fields[-1].value, p["outcome"])
-        self.assertEqual(self.card.replies,
+        self.assertTrue(self.card.deleted)  # #votes is only what is open
+        self.assertEqual((p["channel_id"], p["message_id"]), (5, 70))
+        self.assertIn(p["outcome"], self.shown())
+        self.assertIn("<#61>", self.shown())  # the discussion stays reachable
+        self.assertEqual(self.thread.said,
                          ["Proposal 1 passed (5 yes, 0 no). Voting window is now 48 hours."])
+        self.assertTrue(self.thread.archived)
         self.assertEqual(self.logged, [])  # nobody but the vote decided it
 
     async def test_a_vote_that_fails_or_falls_short_carries_nothing_out(self):
@@ -110,7 +144,7 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         await ending.close(self.client, failed["no"], NOW + DAY)
         self.assertEqual((settings.current()["voting_hours"], settings.current()["quorum"]),
                          (24, 5))
-        self.assertEqual(self.card.replies, [
+        self.assertEqual(self.thread.said, [
             "Proposal 1 did not get enough votes to count (2 yes, 0 no; it needed 5).",
             "Proposal 2 failed (2 yes, 3 no)."])
 
@@ -119,8 +153,9 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         self.vote(p["no"], yes=5)
         await ending.close(self.client, p["no"], NOW + DAY)
         await ending.close(self.client, p["no"], NOW + DAY + 60)
-        self.assertEqual(len(self.card.replies), 1)
-        self.assertIn("written as a code change", self.card.replies[0])
+        self.assertEqual(len(self.thread.said), 1)
+        self.assertIn("written as a code change", self.thread.said[0])
+        self.records.send.assert_awaited_once()
 
     async def test_an_admin_passes_one_logged_before_it_is_carried_out(self):
         order = []
@@ -135,11 +170,13 @@ class Ending(unittest.IsolatedAsyncioTestCase):
             p, said = await ending.pass_now(self.client, self.guild, p["no"], ADMIN, NOW)
         self.assertEqual((p["status"], p["shipped_by"]), (proposals.PASSED, ADMIN))
         self.assertEqual(said, "Done: <#2> has its new topic.")
-        self.channel.send.assert_awaited_once()  # its card is posted, already passed
+        self.votes.send.assert_not_awaited()  # never put to a vote
+        self.records.send.assert_awaited_once()  # recorded, already passed
         self.assertEqual(self.logged[0], f"<@{ADMIN}> passed proposal 1 (New topic for cars) "
-                                         f"without a vote, as an admin: {self.card.jump_url}")
+                                         f"without a vote, as an admin: {self.record.jump_url}")
         self.assertEqual(order, [1])
-        self.assertEqual(self.card.replies, [])  # the card says it; no vote to announce
+        self.assertIn(said, self.shown())
+        self.assertEqual(self.thread.said, [])  # the record says it; no vote to announce
         with self.assertRaisesRegex(proposals.Refused, "closed"):
             await ending.pass_now(self.client, self.guild, p["no"], ADMIN, NOW)
 
@@ -160,8 +197,10 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.logged,
                          [f"<@{ADMIN}> withdrew proposal 1 ({p['title']}) as an admin: "
                           "Duplicate"])
-        self.assertEqual(self.card.edits[0]["embed"].fields[-1].value, "Duplicate")
-        self.assertEqual(self.card.replies, [])
+        self.assertIn("Duplicate", self.shown())
+        self.assertTrue(self.card.deleted)
+        self.assertEqual(self.thread.said, [])
+        self.assertTrue(self.thread.archived)
 
     async def test_a_failure_carrying_it_out_still_gets_its_result_posted(self):
         p = self.posted(actions.KIND.open(1, {"kind": actions.TOPIC, "channel": "cars",
@@ -170,16 +209,29 @@ class Ending(unittest.IsolatedAsyncioTestCase):
         with mock.patch.object(actions, "carry_out", mock.AsyncMock(side_effect=KeyError)):
             p = await ending.close(self.client, p["no"], NOW + DAY)
         self.assertEqual(p["status"], proposals.PASSED)
-        self.assertEqual(self.card.replies,
+        self.assertEqual(self.thread.said,
                          ["Proposal 1 passed (5 yes, 0 no). The bot couldn't carry it out."])
 
     async def test_a_card_that_is_gone_stops_nothing_else(self):
         p = setting_changes.KIND.open(1, "quorum", 8, "", NOW)
         proposals.attach_message(p["no"], 404, 60)
-        self.client.get_channel = lambda cid: None
         self.vote(p["no"], yes=5)
         await ending.close(self.client, p["no"], NOW + DAY)
         self.assertEqual(settings.current()["quorum"], 8)
+        self.records.send.assert_awaited_once()
+
+    async def test_a_card_from_before_votes_had_a_channel_becomes_the_record(self):
+        p = setting_changes.KIND.open(1, "quorum", 8, "", NOW)
+        proposals.attach_message(p["no"], self.records.id, self.card.id)
+        self.records.fetch_message.return_value = self.card
+        self.channels[self.card.id] = self.thread  # its thread has the card's id
+        self.vote(p["no"], yes=5)
+        p = await ending.close(self.client, p["no"], NOW + DAY)
+        self.records.send.assert_not_awaited()
+        self.assertFalse(self.card.deleted)
+        self.assertIsNone(self.card.edits[0]["view"])  # the vote buttons go
+        self.assertEqual(p["thread_id"], self.card.id)
+        self.assertEqual(len(self.thread.said), 1)
 
 
 class Kinds(unittest.TestCase):

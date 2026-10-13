@@ -13,7 +13,7 @@ import updates
 
 class CodeChange(kinds.Kind):
     shipped_footer = ("The code change still goes through every automatic check, and "
-                      "progress is posted here.")
+                      "its progress is shown here.")
 
     def open(self, author_id, title, details, now):
         return proposals.file(author_id, proposals.GENERAL, title.strip(), details.strip(),
@@ -25,7 +25,7 @@ class CodeChange(kinds.Kind):
     async def carry_out(self, client, guild, p):
         updates.start_soon(guild, p["no"])
         return ("It will now be written as a code change, checked, and deployed "
-                "automatically. Progress will be posted here.")
+                "automatically. Its progress is shown here.")
 
 
 KIND = kinds.register(proposals.GENERAL, CodeChange())

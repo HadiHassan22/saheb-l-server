@@ -73,13 +73,15 @@ one of the bot's settings with `/propose-setting`.
   pass.
 - Members who have been here for 7 days can vote. Everyone who joined in
   the server's first week can vote right away.
+- Votes are held in `#votes`, each with a thread to talk it over.
+  `#proposals` shows how every proposal ended.
 - When a vote opens, the bot mentions the Proposal role, so members see it
   and can vote.
 
 **Votes are carried out automatically.** A passed change to the server,
 like a new channel, is made by the bot at once. Anything else is written
 as a code change, checked automatically and deployed, and what changed is
-posted under its proposal.
+shown in `#proposals`.
 
 **What votes can't change.** Who the admins are, the bot's access keys, the system that
 updates and rolls back its code, how far each setting can go (a range
@@ -110,7 +112,7 @@ this, adopting Discord's default `#general` and General voice channel:
 | Category | Channels |
 | --- | --- |
 | Start here | `#welcome`, `#guide`, `#rules`, `#roles`, `#mod-log`, `#server-log`: read-only, posted by the bot |
-| Governance | `#ask-saheb` (talk to the bot), `#proposals` (the bot posts; members discuss in each proposal's thread) |
+| Governance | `#ask-saheb` (talk to the bot), `#votes` (what is being voted on now; members discuss each in its thread), `#proposals` (how every proposal ended; read-only) |
 | Hangout | `#general`, `#introductions`, `#memes`, `#media`, `#off-topic` |
 | Lebanon | `#lebanon-news`, `#politics-and-religion` (30-second slowmode), `#diaspora` |
 | Interests | `#food`, `#pets`, `#gaming`, `#music`, `#sports`, `#movies-and-tv`, `#tech`, `#cars`, `#study-and-work` |
@@ -221,7 +223,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 - **Admins skip the vote.** For an admin (picked by the owner or an admin
   with `/admin add` or by asking the bot, see `admins.py`; the owner
   counts as one), what they ask for is done at once, without questions:
-  posted in `#proposals` as already passed and carried out like a passed
+  recorded in `#proposals` as passed and carried out like a passed
   vote, and the bot says what came of it. Admins also get three tools
   members don't: making or removing admins, overturning a moderation
   case, and giving an existing role to every member at once.
@@ -350,9 +352,10 @@ bot keeps the page ready but can't show it.
 
 ## Voting
 
-- **`/propose`** opens a form for a title and details. The proposal is
-  posted in `#proposals` with Yes and No buttons and a thread for
-  discussion.
+- **`/propose`** opens a form for a title and details. The proposal's
+  card is posted in `#votes` with Yes and No buttons and a thread for
+  discussing it. The card is kept short; a longer proposal is posted in
+  full at the top of its thread.
 - **`/propose-setting`** proposes changing one of the settings below. If
   it passes, the bot applies the change itself.
 - **`/settings`** shows every setting and the range it can be set to.
@@ -360,8 +363,11 @@ bot keeps the page ready but can't show it.
 A proposal runs by the settings in force when it opened. Ballots are
 secret: the card shows only the totals, you can change your vote until it
 closes, and who voted which way is deleted when it does. When it closes,
-the bot carries out the result, then updates the card and says under it
-how the vote went and what came of it. Anyone can
+the bot carries out the result and says in the thread how the vote went
+and what came of it. The card leaves `#votes`, so it only ever shows open
+votes, and the thread is archived. A short record takes its place in
+`#proposals`: the result, what came of it, how its code change is going if
+it needs one, and a link to the thread. Anyone can
 propose; only members who have been in the server long enough can vote.
 Leaving and rejoining restarts that clock.
 
@@ -497,7 +503,7 @@ current dials, run `calibrate.py` (see [Running it](#running-it)).
   towards the appellant's limit of open proposals. If an admin withdraws
   the appeal, it doesn't count: the case can be appealed again, and its
   `#mod-log` entry says so.
-- **The vote.** An appeal is a proposal in `#proposals` showing the case,
+- **The vote.** An appeal is a proposal in `#votes` showing the case,
   the moderator's explanation, the message (unless it was private
   information, sexual content or a scam) and the appellant's reason. It is
   voted **Overturn** or **Keep** under the usual rules. The member it is
@@ -557,8 +563,8 @@ passed proposal that hasn't been handled:
    minutes for `/healthz` to report the new commit; if it doesn't, it
    reverts the change.
 
-The bot follows each proposal through GitHub's API and replies under its
-card in `#proposals`: deploying, live, needs no change, failed, or rolled
+The bot follows each proposal through GitHub's API and shows on its
+record in `#proposals` where it is: deploying, live, needs no change, failed, or rolled
 back. `#admin-log` gets the same with a link to the pull request and what
 happened, step by step: how each writing run ended (finished, out of
 time, turns or money, refused, or broken) with its turns, time, cost,
@@ -601,7 +607,7 @@ one changed, and is told why it wasn't kept.
 | `kinds.py` | What differs between kinds of proposal, each in its own module |
 | `code_changes.py`, `setting_changes.py` | General proposals and setting changes, as kinds of proposal |
 | `ending.py` | Every way a proposal ends: its vote closes, or an admin passes or withdraws it |
-| `cards.py` | How a proposal looks in `#proposals`: its card and its result |
+| `cards.py` | How a proposal looks: its card and thread in `#votes`, and its record in `#proposals` |
 | `automod.py` | The AutoMod rules and watch lists |
 | `banter.py` | The banter check a member's proposal passes before it opens; no Discord |
 | `judge.py` | The questions, routing, verdicts and sanction ladder; no Discord |

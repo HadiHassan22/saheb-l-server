@@ -104,8 +104,8 @@ async def banter_refusal(guild, member, asked, title, details):
 
 
 async def publish(interaction, opener, guild=None, by_admin=False, screen=None):
-    """Open a proposal with `opener(now)` and post it in the proposals
-    channel, with a thread for discussion. Returns the proposal, or None if
+    """Open a proposal with `opener(now)` and post its card in #votes,
+    with a thread for talking it over. Returns the proposal, or None if
     nothing was opened. `guild` is for interactions that arrive by DM.
     `by_admin` passes it at once and carries it out, as a passed vote
     would be; checking that the member is an admin is the caller's job.
@@ -124,9 +124,9 @@ async def publish(interaction, opener, guild=None, by_admin=False, screen=None):
                 f"Proposal {p['no']} passed without a vote. {said or ''}"[:2000],
                 ephemeral=True)
             return p
-        channel = layout.channel(guild, "proposals")
+        channel = layout.channel(guild, "votes")
         if channel is None:
-            raise proposals.Refused("The proposals channel isn't set up yet, so nothing "
+            raise proposals.Refused("The votes channel isn't set up yet, so nothing "
                                     "was proposed.")
         p = opener(int(time.time()))
     except proposals.Refused as e:

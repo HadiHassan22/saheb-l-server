@@ -279,7 +279,7 @@ class People(WithTempData):
         with self.assertRaisesRegex(proposals.Refused, "own case"):
             proposals.cast(p["no"], MEMBER, 0, "no", NOW + 1)
         proposals.cast(p["no"], 9, 0, "yes", NOW + 1)
-        votes = cards.card(proposals.get(p["no"])).fields[2].value
+        votes = cards.card(proposals.get(p["no"])).description
         self.assertIn("1 voted so far", votes)
         self.assertNotIn("1 yes", votes)
 

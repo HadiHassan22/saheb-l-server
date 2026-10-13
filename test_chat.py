@@ -712,13 +712,13 @@ class Admins(WithTempData, unittest.IsolatedAsyncioTestCase):
         p = proposals.pass_now(code_changes.KIND.open(7, "Dark mode", "Add it.", NOW)["no"],
                                7, NOW)
         embed = cards.card(p)
-        self.assertIn("Passed by an admin", embed.fields[-1].value)
+        self.assertIn("Passed by an admin", embed.description)
         self.assertIn("still goes through every automatic check", embed.footer.text)
         q = proposals.withdraw(code_changes.KIND.open(8, "Spam", "Spam.", NOW)["no"],
                                7, "Off topic", NOW)
         embed = cards.card(q)
-        self.assertIn("Withdrawn by an admin", embed.fields[-2].value)
-        self.assertEqual(embed.fields[-1].value, "Off topic")
+        self.assertIn("Withdrawn by an admin", embed.description)
+        self.assertIn("Off topic", embed.description)
 
 
 class Counting(unittest.TestCase):
