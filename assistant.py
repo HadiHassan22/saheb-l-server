@@ -15,7 +15,8 @@ tool is in one of four tiers, fixed here:
   isn't a setting change passes the banter check first (banter.py), which
   reads what the member wrote, not only the draft the model made of it.
 - ADMIN: only offered to admins: making or removing admins, overturning
-  a moderation case, and giving a role to every member.
+  a moderation case, giving a role to every member, and remote control
+  (remote.py), which only posts the request for the admin to confirm.
 
 There is no tool for anything else, so no wording, and no claim to be the
 owner, can make the bot give out powers, act on another member without a
@@ -47,6 +48,7 @@ import pickers
 import proposals
 import providers
 import quick
+import remote
 import setting_changes
 import settings
 import store
@@ -277,6 +279,13 @@ ADMIN_TOOLS = [
           {"number": I, "reason": REASON}, ["number"]),
     _tool("give_role_to_all", "Give an existing role to every member of the server at "
           "once. Roles give no powers.", {"role": S}, ["role"]),
+    _tool("remote_control", "For what no other tool can do because a bot can't (the "
+          "vanity link, settings only Discord's own app has): Saheb does it in Discord's "
+          "own app, in a browser. Nothing happens until the admin reads the request in "
+          "#admin-log and presses Run it.",
+          {"instruction": {"type": "string", "description": "What to do in the server, "
+                                                            "plainly, as the admin asked"}},
+          ["instruction"]),
 ]
 
 TIER = {
@@ -296,6 +305,7 @@ TIER = {
     "draft_setting_change": DRAFT, "draft_proposal": DRAFT,
     "draft_picker_change": DRAFT, "draft_onboarding_change": DRAFT,
     "set_admin": ADMIN, "overturn_case": ADMIN, "give_role_to_all": ADMIN,
+    "remote_control": ADMIN,
 }
 
 
@@ -626,6 +636,10 @@ async def _give_role_to_all(ctx, args):
     return _done(await quick.give_role_to_all(ctx.member, args["role"]))
 
 
+async def _remote_control(ctx, args):
+    return _done(await remote.ask(ctx.guild, ctx.member, args["instruction"]))
+
+
 async def _draft_proposal(ctx, args):
     title = str(args["title"]).strip()[:100]
     details = str(args["details"]).strip()[:2000]
@@ -654,7 +668,7 @@ _TOOLS = {
     "draft_setting_change": _draft_setting_change, "draft_proposal": _draft_proposal,
     "draft_picker_change": _draft_action, "draft_onboarding_change": _draft_action,
     "set_admin": _set_admin, "overturn_case": _overturn_case,
-    "give_role_to_all": _give_role_to_all,
+    "give_role_to_all": _give_role_to_all, "remote_control": _remote_control,
 }
 
 

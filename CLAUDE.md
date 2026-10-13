@@ -63,6 +63,11 @@ first server it joins as home (leaving any other), calls each module's
   to); `assistant.py` defines the tools and their tiers (look, personal,
   light, draft, and admin-only tools); `quick.py` does the instant ones.
   The bot does whatever an admin asks.
+- **Remote control (protected):** `remote.py` drives a browser agent on
+  the owner's own machine for what a bot can't do. Admins only, checked
+  there; a chat request waits for the asking admin's Run it in
+  #admin-log; the relay's address and key live in the store, never in
+  code. Never mention it where members can see it.
 - **AI:** everything goes through one OpenRouter key; `ai.py` holds the
   models and budget, `providers.py` the provider interface.
 - **Server shape:** `layout.py` builds and repairs channels and roles;
