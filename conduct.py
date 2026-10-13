@@ -87,17 +87,17 @@ def welcome_text(owner_mention, mod_log_mention, ask_mention):
 - Voting stays open for {s['voting_hours']} hours.
 - A proposal needs at least {s['quorum']} votes to count (or half the server's members, if that's fewer, but never under 3), and more than {s['pass_percent']}% yes to pass.
 - Members who have been here for {s['voter_min_days']} days can vote. Everyone who joined in the server's first week can vote right away.
-- Votes ping the Proposal role.
+- Votes are in #votes and ping the Proposal role.
 - Before a proposal opens, a check reads what you wrote and asks one question, the same for everyone: "{banter.QUESTION}" If it is at least {s['banter_percent']}% sure, the proposal is turned away. Setting changes skip it, so the check itself can always be voted on.
 
-**Votes are carried out automatically.** A passed change to the server, like a new channel, is made by the bot at once. Anything else is written as a code change, checked automatically and deployed, and what changed is posted under its proposal.
+**Votes are carried out automatically.** A passed change to the server, like a new channel, is made by the bot at once. Anything else is written as a code change, checked automatically and deployed, and what changed is shown in #proposals.
 
 **What votes can't change.** Roles here are only cosmetic (a role can open a channel to whoever holds it, but gives no power over anyone), and nobody but the admins holds power over anyone. Nor can votes change who the admins are, the bot's access keys, the system that updates and rolls back its code, the range each setting can take, the safety floor (blocking scams, phone numbers and sexual content involving minors, and the self-harm support line), and anything Discord's Terms of Service require.
 
 **Fair warning.** The bot can make mistakes, a vote might break something, and it might go offline. If so, we roll back and keep going."""
 
 
-def tutorial_text(ask_mention, proposals_mention):
+def tutorial_text(ask_mention, proposals_mention, votes_mention):
     """(title, text) for #guide: how members use the bot, in its own
     words, pointing at the places they need."""
     return "How to use Saheb l Server", f"""Ahla! This is the guide to using me, Saheb l Server. There are no commands to memorize: just talk to me. Write in English, Arabic or Arabizi, whatever is easier.
@@ -108,7 +108,7 @@ def tutorial_text(ask_mention, proposals_mention):
 
 **Small shared things I do in public, with your name on them.** Schedule an event (times are Beirut time), cancel an event you made, open a temporary voice channel, start a thread. These happen right away and are posted in #server-log with who asked. Pinning or unpinning a message is a vote, since pins are shown to everyone.
 
-**Anything that changes the server for everyone goes to a vote.** Tell me what you want and I'll draft it for you. You file it with the button under my reply, or write one yourself with /propose, and members vote on the card in {proposals_mention} with Yes and No. That covers channels and categories, roles, the pickers in #roles, the questions new members are asked, emojis, stickers and sounds on the soundboard, the server's name or icon, the rules, AutoMod watch words, cancelling someone else's event, pinning or unpinning a message, settings, kicking, banning or unbanning a member, and changing a member's nickname. Anything else is a general proposal: if it passes and it needs new code, I write it into my own code, it's checked, and it goes live.
+**Anything that changes the server for everyone goes to a vote.** Tell me what you want and I'll draft it for you. You file it with the button under my reply, or write one yourself with /propose, and members vote on its card in {votes_mention} with Yes and No and talk it over in the thread under it. {proposals_mention} shows how every proposal ended. That covers channels and categories, roles, the pickers in #roles, the questions new members are asked, emojis, stickers and sounds on the soundboard, the server's name or icon, the rules, AutoMod watch words, cancelling someone else's event, pinning or unpinning a message, settings, kicking, banning or unbanning a member, and changing a member's nickname. Anything else is a general proposal: if it passes and it needs new code, I write it into my own code, it's checked, and it goes live.
 
 **No human moderators here, and that's the point.** I'm an algorithm: no moods, no favourites, no grudges, the same questions for everyone. The members govern this server by voting, and I carry out what you decide. Think a moderation call was wrong anyway? Use /appeal with the case number, or the Appeal button in my message to you, and the community votes on it.
 

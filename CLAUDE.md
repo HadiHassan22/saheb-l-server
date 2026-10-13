@@ -78,8 +78,8 @@ first server it joins as home (leaving any other), calls each module's
   `/healthz` (`health.py`) doesn't show the new commit. The bot starts
   it when a proposal passes (`workflow.py`, the owner's `/github-key`
   token); GitHub's timer is the backup. `updates.py` reports progress
-  under the card and, with links, in #admin-log (only admins can read it:
-  `admins.post`).
+  on the proposal's record in #proposals and, with links, in #admin-log
+  (only admins can read it: `admins.post`).
 
 ## Rules for every change
 

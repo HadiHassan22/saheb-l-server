@@ -78,8 +78,8 @@ KINDS = (CHANNEL_KINDS + ROLE_KINDS + EMOJI_KINDS + STICKER_KINDS + SOUND_KINDS 
 # Votes about a member: a higher bar, a hidden count, and no vote for them.
 ABOUT_A_MEMBER = (KICK, BAN)
 
-CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "ask-saheb",
-        "automod-alerts", "admin-log", "AFK"}
+CORE = {"welcome", "rules", "roles", "mod-log", "server-log", "proposals", "votes",
+        "ask-saheb", "automod-alerts", "admin-log", "AFK"}
 TEXT_NAME = re.compile(r"^[a-z0-9-]{1,100}$")
 EMOJI_NAME = re.compile(r"^[A-Za-z0-9_]{2,32}$")
 LINK = re.compile(r"discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)")

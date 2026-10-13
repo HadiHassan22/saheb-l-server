@@ -45,12 +45,15 @@ class WithTempData(unittest.TestCase):
 
 class Withdrawing(WithTempData, unittest.IsolatedAsyncioTestCase):
     async def withdraw(self, user_id, no):
-        sent, card = [], mock.Mock(edit=mock.AsyncMock())
+        sent, card = [], mock.Mock(edit=mock.AsyncMock(), delete=mock.AsyncMock())
         channel = mock.Mock(fetch_message=mock.AsyncMock(return_value=card))
         interaction = types.SimpleNamespace(
             user=types.SimpleNamespace(id=user_id, mention=f"<@{user_id}>"),
             guild=types.SimpleNamespace(id=99, owner_id=1),
-            client=types.SimpleNamespace(get_channel=lambda cid: channel),
+            # The card is in channel 6; its thread (60) is gone.
+            client=types.SimpleNamespace(get_channel=lambda cid: channel if cid == 6 else None,
+                                         fetch_channel=mock.AsyncMock(
+                                             side_effect=discord.NotFound(mock.Mock(), ""))),
             response=types.SimpleNamespace(
                 defer=mock.AsyncMock(),
                 send_message=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))),
@@ -131,7 +134,7 @@ class Text(WithTempData):
         labels = [item.item.label for item in voting_ui.vote_buttons(p).children]
         self.assertEqual(labels, ["Overturn", "Keep"])
         embed = cards.card(p)
-        self.assertIn("0 overturn · 0 keep", embed.fields[2].value)
+        self.assertIn("0 overturn · 0 keep", embed.description)
         self.assertIn("can't vote on it", embed.footer.text)
 
 

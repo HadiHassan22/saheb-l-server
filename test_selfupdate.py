@@ -961,7 +961,7 @@ class Retry(WithTempData):
                 send=mock.AsyncMock(side_effect=lambda text, **k: sent.append(text))))
         with mock.patch.object(layout, "home_id", lambda: 99), \
                 mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged, \
-                mock.patch.object(updates, "_say", mock.AsyncMock()) as said, \
+                mock.patch.object(updates, "_show", mock.AsyncMock()) as said, \
                 mock.patch.object(updates, "start_soon") as started:
             interaction.user.id = 8  # not an admin
             await updates.retry_command.callback(interaction, self.no)

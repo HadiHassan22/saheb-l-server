@@ -5,7 +5,7 @@
   server's slash commands.
 - Anyone in the server can use /appeal on a case that still stands, which
   also covers a banned member whose DMs are closed.
-- An appeal is a proposal in #proposals, voted Overturn or Keep under the
+- An appeal is a proposal voted on in #votes, Overturn or Keep under the
   usual rules. The member it is about can't vote on it.
 - If it passes, the bot undoes what it can: it lifts the timeout, or
   unbans and sends an invite back. A deleted message can't be restored.

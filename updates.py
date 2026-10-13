@@ -1,5 +1,5 @@
 """Following each passed proposal through the self-update workflow, and
-saying what happened under the proposal's card in #proposals.
+showing where it is on the proposal's record in #proposals.
 
 The workflow (.github/workflows/self-update.yml) writes the change for
 proposal N on a branch named `proposal-N`, checks it, and records the
@@ -138,6 +138,17 @@ def pieces(text, size=1900, most=3):
     return out
 
 
+# Where a proposal's code change is, on its record in #proposals.
+STATUS = {
+    WRITING: "written, being checked",
+    MERGED: "passed every check, deploying",
+    LIVE: "live",
+    NO_CHANGE: "none needed, or it can't be done without touching the protected core",
+    FAILED: "failed a check, so it couldn't be put into effect",
+    ROLLED_BACK: "rolled back: the new version didn't start",
+}
+
+
 def message(no, stage, summary=""):
     said = {
         WRITING: f"The change for proposal {no} is written and being checked.",
@@ -178,8 +189,13 @@ def running_proposal():
     return _saved()["commits"].get(health.COMMIT)
 
 
-async def _say(client, no, text):
-    await cards.reply(client, proposals.get(no), text)
+async def _show(client, no, progress, summary=None):
+    """Show where proposal `no`'s code change is on its record, with what
+    the workflow wrote for members about it, if anything new."""
+    fields = {"progress": progress}
+    if summary is not None:
+        fields["summary"] = summary
+    await cards.refresh(client, proposals.record(no, **fields))
 
 
 async def _tell_admins(guild, text):
@@ -309,7 +325,7 @@ async def follow(client):
     try:
         live = running_proposal()
         if live is not None and advance(live, LIVE):
-            await _say(client, live, message(live, LIVE))
+            await _show(client, live, STATUS[LIVE])
             await _tell_admins(guild, message(live, LIVE))
         for pr in reversed(await workflow.get("pulls", {
                 "state": "all", "per_page": "100", "sort": "updated", "direction": "desc"})):
@@ -322,7 +338,8 @@ async def follow(client):
                     or attempt_of(pr) != proposals.attempt(p)):
                 continue
             if advance(no, stage, pr):
-                await _say(client, no, message(no, stage, summary_of(pr)))
+                await _show(client, no, STATUS[stage],
+                            summary_of(pr) if stage in (MERGED, NO_CHANGE, FAILED) else None)
                 await _tell_admins(guild, f"{message(no, stage)}\n<{pr['html_url']}>")
                 for piece in pieces(details_of(pr)):
                     await _tell_admins(guild, piece)
@@ -398,9 +415,9 @@ async def retry_command(interaction: discord.Interaction, proposal: int):
                                f"({p['title']}) to be tried again, as an admin.")
     except discord.HTTPException as e:
         log.error(f"proposal {p['no']}'s retry wasn't logged: {e!r}")
-    await _say(interaction.client, p["no"],
-               f"An admin asked for proposal {p['no']}'s code change to be tried again, "
-               "starting from what went wrong last time. Progress will be posted here.")
+    await _show(interaction.client, p["no"],
+                "an admin asked for another try, starting from what went wrong last time",
+                "")
     start_soon(interaction.guild, p["no"])
     await interaction.followup.send(
         f"Proposal {p['no']} will be tried again (try {proposals.attempt(p)}).",

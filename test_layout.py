@@ -20,7 +20,7 @@ import layout
 import store
 
 ROOMS = [spec for _, channels in layout.PLAN for spec in channels]
-NEEDED = ("welcome", "guide", "rules", "roles", "mod-log", "proposals", "general",
+NEEDED = ("welcome", "guide", "rules", "roles", "mod-log", "proposals", "votes", "general",
           "automod-alerts", "admin-log", "AFK")
 
 

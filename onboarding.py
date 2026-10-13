@@ -38,7 +38,7 @@ REASON = "Keeping onboarding in step with the server"
 
 # Planned channel names (layout.PLAN), turned into ids the first time.
 DEFAULT_CHANNELS = ["welcome", "guide", "rules", "roles", "ask-saheb", "proposals",
-                    "mod-log", "server-log", "general", "introductions", "memes",
+                    "votes", "mod-log", "server-log", "general", "introductions", "memes",
                     "media", "off-topic", "General", "Ahwe", "Lounge"]
 DEFAULT_QUESTIONS = [
     ("What are you into?", False, [

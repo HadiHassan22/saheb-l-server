@@ -57,8 +57,11 @@ PLAN = [
         room("ask-saheb",
              topic="Tag Saheb l Server or reply to it: ask how things work, change "
                    "your name color, or have it draft a proposal.", slowmode=5),
-        room("proposals", THREADS_ONLY,
-             "Use /propose to add one. Discuss each proposal in its thread."),
+        room("votes", THREADS_ONLY,
+             "What is being voted on now. Vote with the buttons, and talk each one "
+             "over in its thread. Use /propose to add one."),
+        room("proposals", READ_ONLY,
+             "How every proposal ended, and what came of it."),
     ]),
     ("Hangout", [
         room("general", topic="Everything and nothing. English, Arabic and Arabizi "
@@ -260,10 +263,12 @@ async def post_texts(guild):
     saved = _saved()
     ask = channel(guild, "ask-saheb")
     proposals = channel(guild, "proposals")
+    votes = channel(guild, "votes")
     welcome = conduct.welcome_text(owner, mod_log.mention if mod_log else "#mod-log",
                                    ask.mention if ask else "#ask-saheb")
     guide = conduct.tutorial_text(ask.mention if ask else "#ask-saheb",
-                                  proposals.mention if proposals else "#proposals")
+                                  proposals.mention if proposals else "#proposals",
+                                  votes.mention if votes else "#votes")
     # Embeds rather than plain messages: a description holds 4096 characters.
     for name, (title, text) in (("welcome", welcome), ("guide", guide),
                                 ("rules", conduct.rules_text())):
