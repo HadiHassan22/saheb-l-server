@@ -530,7 +530,8 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual([t["role"] for t in chat.history(5, NOW + 60)], ["user", "model"])
         self.assertEqual(chat.history(5, NOW + chat.MEMORY_TTL + 1), [])
 
-    async def say(self, content, mentions=(), roles=(), reply_to=None, channel_id=5):
+    async def say(self, content, mentions=(), roles=(), reply_to=None, channel_id=5,
+                  attachments=()):
         """Post `content` in a channel (#ask-saheb unless `channel_id` says
         otherwise) and return what the bot answered, or None if it stayed
         quiet."""
@@ -544,7 +545,8 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
             reference = types.SimpleNamespace(message_id=reply_to.id, resolved=None,
                                               cached_message=None)
         message = types.SimpleNamespace(
-            content=content, attachments=[], reference=reference, channel=here,
+            content=content, attachments=list(attachments), reference=reference,
+            channel=here,
             author=types.SimpleNamespace(id=7, bot=False, display_name="Rami"),
             guild=types.SimpleNamespace(id=99, me=me, owner_id=1),
             mentions=[me if m == "me" else m for m in mentions],
@@ -559,6 +561,7 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         if not respond.await_count:
             message.reply.assert_not_awaited()
             return None
+        self.shown = respond.call_args.args[0].attachments
         return respond.call_args.args[2]
 
     async def test_it_answers_only_when_tagged_or_replied_to(self):
@@ -576,6 +579,25 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         text = await self.say("and to pass?", reply_to=mine)
         self.assertIn("and to pass?", text)
         self.assertIn("The quorum is 5.", text)
+
+    async def test_tagged_in_a_reply_it_reads_the_message_and_sees_its_picture(self):
+        """Someone posts a picture, another member replies "@Saheb make this
+        an emoji": the bot sees it without anyone posting it again."""
+        picture = attachment("image/png", b"pixels")
+        theirs = mock.Mock(spec=discord.Message, id=73, content="look at this cat",
+                           attachments=[picture],
+                           author=types.SimpleNamespace(id=8, display_name="Maya"))
+        self.assertIsNone(await self.say("lol", reply_to=theirs))
+        text = await self.say("<@500> make this an emoji", mentions=["me"],
+                              reply_to=theirs)
+        self.assertEqual(self.shown, [picture])
+        self.assertIn("Replying to Maya's message: look at this cat", text)
+        self.assertIn("with 1 attachment(s): number 1)", text)
+        own = attachment("image/png", b"mine")
+        text = await self.say("<@500> both of these", mentions=["me"], reply_to=theirs,
+                              attachments=[own])
+        self.assertEqual(self.shown, [own, picture])
+        self.assertIn("number 2)", text)
 
     async def test_it_answers_in_any_channel_but_only_when_tagged(self):
         general = 6

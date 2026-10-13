@@ -51,7 +51,9 @@ reasoning.
 **Talk to the bot.** Ask Saheb l Server anything, in `#ask-saheb` or any
 other channel, in English, Arabic or Arabizi: tag it or reply to one of
 its messages, with an
-image attached if you want it to see one. It
+image attached if you want it to see one (or tag it in a reply to
+someone's message, "make this an emoji", and it reads that message and
+sees its picture). It
 changes your name color when you ask (or
 pick one in `#roles`), answers questions about the server, and drafts
 proposals for anything that affects everyone. It never files a proposal
@@ -166,10 +168,13 @@ sectarian leaders. The politics are flavour, a line when it fits: they
 never change how it treats a member or a request, and they stay out of
 moderation, whose questions are the same for everyone (`judge.py`). It answers only
 messages that tag it or reply to it, in any channel, so members talk to
-each other freely; those are the only ordinary messages whose words the
-bot reads. If such a message has an image attached, the bot can see it too
-(up to 3 images, 5 MB each) and use what's in it, for example drafting an
-emoji, a sticker or the server's icon straight from the attachment. A sound
+each other freely; those, and a message a member tags it in a reply to,
+are the only ordinary messages whose words the bot reads. If such a
+message has an image attached, the bot can see it too (up to 3 images,
+5 MB each) and use what's in it, for example drafting an emoji, a sticker
+or the server's icon straight from the attachment. So "make this a
+sticker" under someone's picture, or "make this a rule" under someone's
+message, works without posting it again. A sound
 file attached the same way can become a sound on the soundboard (see
 [The soundboard](#the-soundboard)). The model understands the request, and
 code decides what is allowed: every tool is in one of four tiers, fixed in

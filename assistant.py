@@ -76,7 +76,7 @@ How to answer:
 
 What your tools do:
 - Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding.
-- See images a member attaches to a message that tags or replies to you, and use what's in them, for example drafting an emoji, a sticker or the server's icon straight from the attachment instead of asking them to describe it.
+- Read the message a member replied to when they tagged you, and see images attached to their message or that one, and use what's in them, for example drafting an emoji, a sticker or the server's icon straight from the attachment instead of asking them to describe it.
 - At once, for the member themself: their name color, joining or leaving a role, their nickname, an invite link.
 - At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread.
 - Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning or unpinning a message, a setting, kicking, banning or unbanning a member, or changing a member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #proposals with Yes and No (Overturn and Keep on an appeal).
@@ -117,9 +117,11 @@ def _tool(name, description, properties=None, required=()):
 S, I, B = {"type": "string"}, {"type": "integer"}, {"type": "boolean"}
 REASON = {"type": "string", "description": "Why, in the member's words"}
 ATTACHMENT = {"type": "integer", "description": "Which image attached to the member's "
-                                                "message, counting from 1"}
+                                                "message or the one they replied to, "
+                                                "counting from 1"}
 SOUND_ATTACHMENT = {"type": "integer", "description": "Which sound file attached to the "
-                                                      "member's message, counting from 1"}
+                                                      "member's message or the one they "
+                                                      "replied to, counting from 1"}
 
 
 def _draft_tool(name, description, kinds, properties, required=("change",)):
@@ -533,7 +535,8 @@ async def _attached_file(ctx, number, limit, what):
     Returns its name."""
     kind, word = ("audio/", "sound file") if what == "sound" else ("image/", "image")
     if not isinstance(number, int) or not 1 <= number <= len(ctx.attachments):
-        raise quick.Refused(f"Attach the {word} to your message.")
+        raise quick.Refused(f"Attach the {word} to your message, or tag me in a reply "
+                            f"to the message that has it.")
     attachment = ctx.attachments[number - 1]
     if not (attachment.content_type or "").startswith(kind):
         raise quick.Refused(f"That attachment isn't a {word}.")

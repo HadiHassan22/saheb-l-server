@@ -3,7 +3,9 @@ it may do), in #ask-saheb or any other channel.
 
 It answers only when tagged or replied to, wherever that is, so members
 talk to each other freely without every message costing an answer, and
-the bot never reads what an ordinary message says.
+the bot never reads what an ordinary message says. Tagged in a reply to
+someone else's message, it reads that message and sees its attachments:
+the member pointed it there.
 
 Each member gets a short memory of their own recent exchanges, forgotten
 after half an hour, and a limit on how often they can ask, because every
@@ -97,8 +99,8 @@ class FileDraft(discord.ui.DynamicItem[discord.ui.Button], template=r"draft:(?P<
             assistant.mark_filed(self.no, p["no"])
 
 
-async def replied_to(message, me):
-    """The bot's message this one replies to, or None."""
+async def replied_to(message):
+    """The message this one replies to, whoever wrote it, or None."""
     ref = message.reference
     if ref is None or ref.message_id is None:
         return None
@@ -108,8 +110,7 @@ async def replied_to(message, me):
             replied = await message.channel.fetch_message(ref.message_id)
         except discord.HTTPException:
             return None
-    replied = replied or ref.cached_message
-    return replied if replied.author.id == me.id else None
+    return replied or ref.cached_message
 
 
 def tagged(message, me):
@@ -183,16 +184,22 @@ async def on_message(message, client=None):
     if message.guild.id != layout.home_id():
         return
     me = message.guild.me
-    replied = await replied_to(message, me)
-    if replied is None and not tagged(message, me):
+    replied = await replied_to(message)
+    mine = replied is not None and replied.author.id == me.id
+    if not mine and not tagged(message, me):
         return
+    # Tagged in a reply to someone else's message ("make this an emoji",
+    # "make this a rule"), the bot reads it and sees its pictures too, so
+    # nobody has to post it again.
+    other = replied if replied is not None and not mine else None
+    theirs = list(other.attachments) if other is not None else []
     now = time.time()
     if not allowed(message.author.id, now):
         return await message.reply("You've asked a lot in a short time. Give it a few "
                                    "minutes.", mention_author=False)
     admin = admins.allowed(message.author.id, message.guild)
     ctx = assistant.Context(guild=message.guild, member=message.author,
-                            attachments=list(message.attachments),
+                            attachments=list(message.attachments) + theirs,
                             client=client, admin=admin)
     text = strip_tag(message.content, me)[:1500] or "(tagged you with no text)"
     others = [m for m in message.mentions if m.id != me.id]
@@ -201,11 +208,20 @@ async def on_message(message, client=None):
         # carries the exact member meant.
         text += "\n(Mentioned: " + ", ".join(
             f"{m.display_name} = <@{m.id}>" for m in others) + ")"
-    if replied is not None and replied.content:
+    if mine and replied.content:
         # It may be an answer to someone else, not in this member's memory.
         text += f"\n(Replying to your message: {replied.content[:500]})"
     if message.attachments:
         text += f"\n({len(message.attachments)} attachment(s))"
+    if other is not None:
+        text += f"\n(Replying to {other.author.display_name}'s message"
+        if other.content:
+            text += f": {other.content[:500]}"
+        if theirs:
+            first = len(message.attachments) + 1
+            text += (f"\n... with {len(theirs)} attachment(s): number {first}"
+                     + (f" to {first + len(theirs) - 1}" if len(theirs) > 1 else ""))
+        text += ")"
     if admin:
         text += ("\n(This member is an admin: do whatever they ask, at once. Your draft "
                  "tools act without a vote, except deleting a channel or category.)")
