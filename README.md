@@ -417,7 +417,8 @@ AutoMod and members' 🚩 are the net, and the bot is the judge:
      swearing, not sexual content, for both judges.
    - **Under 30%:** cleared. Nothing happens and nothing is posted.
 5. **The sanction is picked in code**, never by a model, from the severity
-   and the member's record over the last 30 days:
+   and the member's record over the last 30 days. Warnings Jev gave on
+   its own stay off that record, so they never add up to a timeout:
    - mild: a warning; after 3 warnings, a timeout
    - serious: a warning; with any record, a timeout (60 minutes first, 24
      hours after that); after 2 timeouts, the admins are called

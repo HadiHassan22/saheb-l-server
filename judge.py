@@ -14,11 +14,13 @@
      and Haiku reviews the conversation and decides;
    - below `review_percent`, the message is cleared.
 3. The sanction is picked here, in code, from the severity and the
-   member's record, so no model ever chooses a punishment. This is a free
-   speech server, so severe means real danger to a real person, never
-   words alone: only rules 3 to 6 (threats, doxxing, sexual content,
-   scams) can be severe, whatever a model says, and both judges are told
-   exactly what qualifies (SEVERE_MEANS).
+   member's record, so no model ever chooses a punishment. Warnings the
+   first check gave alone stay off the record, so they never add up to
+   a timeout either. This is a free speech server, so severe means real
+   danger to a real person, never words alone: only rules 3 to 6
+   (threats, doxxing, sexual content, scams) can be severe, whatever a
+   model says, and both judges are told exactly what qualifies
+   (SEVERE_MEANS).
 4. The bot never bans. What is bad enough for a ban, a severe violation
    or a serious one after `timeouts_before_ban` timeouts, holds the member
    in a timeout and calls the admins, who decide.
@@ -292,7 +294,7 @@ class Verdict:
     decided_by: str     # FIRST_CHECK or REVIEWED
 
 
-FIRST_CHECK = "first check"
+FIRST_CHECK = cases.FIRST_CHECK
 REVIEWED = "review"
 
 

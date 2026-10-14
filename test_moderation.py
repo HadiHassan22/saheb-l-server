@@ -255,6 +255,15 @@ class Records(unittest.TestCase):
         self.assertEqual(cases.last_action_at(1), NOW - cases.DAY)
         self.assertIsNone(cases.last_action_at(3))
 
+    def test_warnings_the_first_check_gave_alone_stay_off_the_record(self):
+        for _ in range(3):
+            cases.open_case(NOW - cases.DAY, user_id=1, action=cases.WARN, minutes=0,
+                            decided_by=judge.FIRST_CHECK)
+        cases.open_case(NOW - cases.DAY, user_id=1, action=cases.WARN, minutes=0,
+                        decided_by=judge.REVIEWED)
+        self.assertEqual(cases.record_of(1, NOW, 30), {"warnings": 1, "timeouts": 0})
+        self.assertEqual(cases.last_action_at(1), NOW - cases.DAY)
+
     def test_case_numbers_count_up(self):
         self.assertEqual([self.open(1, cases.WARN, NOW)["no"] for _ in range(3)], [1, 2, 3])
 

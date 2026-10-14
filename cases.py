@@ -11,6 +11,9 @@ BAN = "ban"
 ACTIVE = "active"
 OVERTURNED = "overturned"
 
+# A case the first check (Jev) decided alone, with no review (judge.py).
+FIRST_CHECK = "first check"
+
 
 def _load():
     return store.load("cases", {"next_no": 1, "cases": {}})
@@ -26,12 +29,15 @@ def get(no):
 
 def record_of(user_id, now, days):
     """How many warnings and timeouts this member has had in the last
-    `days` days, not counting overturned ones."""
+    `days` days, not counting overturned ones or warnings the first check
+    gave alone. The first check reads Lebanese swearing badly and acts
+    without a review, so its warnings never add up to a timeout."""
     since = now - days * DAY
     counts = {WARN: 0, TIMEOUT: 0}
     for case in _load()["cases"].values():
         if (case["user_id"] == user_id and case["status"] == ACTIVE
-                and case["at"] >= since and case["action"] in counts):
+                and case["at"] >= since and case["action"] in counts
+                and case.get("decided_by") != FIRST_CHECK):
             counts[case["action"]] += 1
     return {"warnings": counts[WARN], "timeouts": counts[TIMEOUT]}
 
