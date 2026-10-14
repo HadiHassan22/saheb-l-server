@@ -88,10 +88,9 @@ class WithTempData(unittest.IsolatedAsyncioTestCase):
 
 
 class Relay(WithTempData):
-    def test_every_instruction_goes_straight_to_the_server(self):
+    def test_an_instruction_is_passed_as_given(self):
         told = remote.prompt("  change our vanity tag ")
-        self.assertTrue(told.startswith(
-            "use aside browser, go into the liban server then change our vanity tag"))
+        self.assertTrue(told.startswith("change our vanity tag"))
         self.assertTrue(told.endswith(remote.GUARD))
 
     async def test_nothing_is_sent_without_an_address_and_key(self):
