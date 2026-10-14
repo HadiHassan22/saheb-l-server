@@ -308,6 +308,8 @@ def _audit_id(value):
 
 
 def _audit_value(value, field="", depth=0):
+    if field == "topic":
+        return "changed"  # topics may contain private channel instructions
     if depth > 4:
         return "unavailable"
     if field in _AUDIT_STRUCTURES and type(value) in (str, int, bool, set):
@@ -340,10 +342,20 @@ def _audit_value(value, field="", depth=0):
         return _audit_bound(", ".join(parts), 160) if parts else "unavailable"
     # Cached public channel/role/guild references, including unresolved Objects.
     ident = _audit_id(getattr(value, "id", None))
-    name = getattr(value, "name", None)
     if ident:
-        return f"{_audit_text(name, 70)} (ID {ident})" if type(name) is str else f"ID {ident}"
+        return f"ID {ident}"
     return "unavailable"  # never repr() unknown objects or dictionaries
+
+
+def _audit_same(old, new):
+    """Safe equality only for scalars; never compare arbitrary payloads deeply."""
+    if old is new:
+        return True
+    if type(old) is type(new) and type(old) in (str, int, bool, type(None)):
+        return old == new
+    if type(old) is type(new) and type(old) in (discord.Permissions, discord.Colour):
+        return type(old.value) is int and type(new.value) is int and old.value == new.value
+    return False  # audit diff presence is evidence, not a repr/deep equality check
 
 
 def _audit_details(entry):
@@ -360,10 +372,18 @@ def _audit_details(entry):
         old, new = getattr(before, field, missing), getattr(after, field, missing)
         if old is missing and new is missing:
             continue
-        old_text = "unset" if old is missing else _audit_value(old, field)
-        new_text = "unset" if new is missing else _audit_value(new, field)
-        if old_text != new_text:
-            parts.append(f"{field}: {old_text} → {new_text}")
+        if group == "channel" and field in ("name", "topic"):
+            # Public audit transport: channel names/topics can be private,
+            # including deleted/uncached channels. Never disclose their text.
+            if not _audit_same(old, new):
+                parts.append(f"{field}: changed")
+        else:
+            old_text = "unset" if old is missing else _audit_value(old, field)
+            new_text = "unset" if new is missing else _audit_value(new, field)
+            if old_text != new_text:
+                parts.append(f"{field}: {old_text} → {new_text}")
+            elif not _audit_same(old, new):
+                parts.append(f"{field}: changed (shown: {new_text})")
         if len(parts) == 6:
             break
     return (" [" + "; ".join(parts)[:800] + "]") if parts else ""
@@ -378,10 +398,12 @@ def _target(entry):
     # Keep canonical Discord references; server_log already suppresses pings.
     if ident and mention in (f"<@{ident}>", f"<@!{ident}>", f"<@&{ident}>", f"<#{ident}>"):
         return mention
+    action = entry.action.name
+    if action.startswith(("channel_", "overwrite_")) or action == "message_bulk_delete":
+        return f"channel (ID {ident})" if ident else "channel"
     for value in (getattr(target, "name", None), getattr(before, "name", None)):
         if type(value) is str and value:
             return _audit_text(value)
-    action = entry.action.name
     label = ("server onboarding prompt" if action.startswith("onboarding_prompt_") else
              "server onboarding" if action.startswith("onboarding_") else
              "server home settings" if action.startswith("home_settings_") else "target")

@@ -133,6 +133,21 @@ class AuditLog(WithTempData):
         entry.guild.id = 100
         self.assertEqual(await self.posted(entry), [])
 
+    async def test_private_channel_topic_values_never_reach_public_log(self):
+        admins.add(ADMIN)
+        entry = self.entry(discord.AuditLogAction.channel_update, ADMIN,
+            types.SimpleNamespace(id=42, name="admin-log", mention="<#42>"),
+            before=types.SimpleNamespace(topic="PRIVATE_OLD_INSTRUCTIONS", name="PRIVATE_OLD_NAME"),
+            after=types.SimpleNamespace(topic="PRIVATE_NEW_INSTRUCTIONS", name="PRIVATE_NEW_NAME"))
+        said = await self.posted(entry)
+        self.assertEqual(len(said), 1)
+        self.assertIn("topic: changed", said[0])
+        self.assertNotIn("PRIVATE_OLD_INSTRUCTIONS", said[0])
+        self.assertNotIn("PRIVATE_NEW_INSTRUCTIONS", said[0])
+        self.assertIn("name: changed", said[0])
+        self.assertNotIn("PRIVATE_OLD_NAME", said[0])
+        self.assertNotIn("PRIVATE_NEW_NAME", said[0])
+
     async def test_an_admin_changing_their_own_nickname_is_not_posted(self):
         admins.add(ADMIN)
         self.assertEqual(await self.posted(self.entry(discord.AuditLogAction.member_update,
@@ -177,7 +192,7 @@ class AuditDetails(unittest.TestCase):
                 del entry.target
                 self.assertIn(label, admins.did(entry))
                 self.assertNotIn("something", admins.did(entry))
-        self.assertEqual(admins._target(self.entry("channel_delete")), "target")
+        self.assertEqual(admins._target(self.entry("channel_delete")), "channel")
 
     def test_uncached_target_id_is_retained(self):
         entry = self.entry("onboarding_prompt_update", discord.Object(id=12345))
@@ -187,7 +202,7 @@ class AuditDetails(unittest.TestCase):
 
     def test_public_name_and_deleted_name_fallbacks(self):
         self.assertEqual(admins._target(self.entry("channel_update",
-                         types.SimpleNamespace(name="general"))), "general")
+                         types.SimpleNamespace(id=42, name="general", mention="<#42>"))), "<#42>")
         self.assertEqual(admins._target(self.entry("role_delete",
                          before=types.SimpleNamespace(name="Games"))), "Games")
 
@@ -239,7 +254,7 @@ class AuditDetails(unittest.TestCase):
             self.assertNotIn(secret, text)
 
     def test_changed_public_channel_role_and_guild_fields(self):
-        cases = (("channel_update", "topic", "old topic", "new topic"),
+        cases = (("channel_update", "nsfw", False, True),
                  ("role_update", "mentionable", False, True),
                  ("guild_update", "afk_timeout", 60, 300))
         for action, field, old, new in cases:
@@ -254,6 +269,56 @@ class AuditDetails(unittest.TestCase):
         self.assertIn("permissions: unset → 8", text)
         self.assertIn("colour:", text)
 
+    def test_topic_values_are_redacted_for_all_channel_actions_and_targets(self):
+        private = types.SimpleNamespace(id=42, name="admin-log", mention="<#42>")
+        for action in ("channel_create", "channel_update", "channel_delete"):
+            for target in (private, discord.Object(id=42), None):
+                with self.subTest(action=action, target_type=type(target).__name__):
+                    before = (types.SimpleNamespace(topic="PRIVATE_OLD_INSTRUCTIONS")
+                              if action != "channel_create" else None)
+                    after = (types.SimpleNamespace(topic="PRIVATE_NEW_INSTRUCTIONS")
+                             if action != "channel_delete" else None)
+                    text = admins.did(self.entry(action, target, before, after))
+                    self.assertIn("topic: changed", text)
+                    self.assertNotIn("PRIVATE_OLD_INSTRUCTIONS", text)
+                    self.assertNotIn("PRIVATE_NEW_INSTRUCTIONS", text)
+        self.assertEqual(admins._audit_value("PRIVATE_TOPIC", "topic"), "changed")
+        unchanged = admins.did(self.entry("channel_update", private,
+            types.SimpleNamespace(topic="PRIVATE_UNCHANGED"),
+            types.SimpleNamespace(topic="PRIVATE_UNCHANGED")))
+        self.assertNotIn("topic:", unchanged)
+        self.assertNotIn("PRIVATE_UNCHANGED", unchanged)
+
+    def test_hidden_channel_names_are_redacted_in_changes_and_target_fallbacks(self):
+        for action in ("channel_create", "channel_update", "channel_delete"):
+            for target in (types.SimpleNamespace(id=42, name="PRIVATE_TARGET_NAME"),
+                           discord.Object(id=42), None):
+                with self.subTest(action=action, target_type=type(target).__name__):
+                    before = (types.SimpleNamespace(name="PRIVATE_OLD_NAME")
+                              if action != "channel_create" else None)
+                    after = (types.SimpleNamespace(name="PRIVATE_NEW_NAME")
+                             if action != "channel_delete" else None)
+                    text = admins.did(self.entry(action, target, before, after))
+                    self.assertIn("name: changed", text)
+                    self.assertIn("channel", text)
+                    for private in ("PRIVATE_TARGET_NAME", "PRIVATE_OLD_NAME", "PRIVATE_NEW_NAME"):
+                        self.assertNotIn(private, text)
+        self.assertEqual(admins._target(self.entry("channel_delete",
+            types.SimpleNamespace(id=42, name="PRIVATE_TARGET_NAME"))), "channel (ID 42)")
+        self.assertEqual(admins._target(self.entry("channel_delete",
+            before=types.SimpleNamespace(name="PRIVATE_OLD_NAME"))), "channel")
+
+    def test_named_channel_references_are_logged_as_ids_only(self):
+        channel = types.SimpleNamespace(id=42, name="PRIVATE_REFERENCE_NAME")
+        for action, field, value in (("guild_update", "afk_channel", channel),
+                                     ("onboarding_update", "default_channels", [channel])):
+            with self.subTest(action=action):
+                text = admins.did(self.entry(action,
+                    after=types.SimpleNamespace(**{field: value})))
+                self.assertIn("ID 42", text)
+                self.assertNotIn("PRIVATE_REFERENCE_NAME", text)
+        self.assertEqual(admins._audit_value(channel), "ID 42")
+
     def test_unexpected_fields_and_objects_are_not_dumped(self):
         class Secret:
             def __repr__(self):
@@ -261,9 +326,11 @@ class AuditDetails(unittest.TestCase):
             def __str__(self):
                 raise AssertionError("must not stringify arbitrary objects")
         text = admins.did(self.entry("channel_update", after=types.SimpleNamespace(
-            topic=Secret(), token="SECRET_TOKEN", password="SECRET_PASSWORD",
+            name=Secret(), topic=Secret(), bitrate=Secret(),
+            token="SECRET_TOKEN", password="SECRET_PASSWORD",
             unexpected={"secret": "SECRET_PAYLOAD"})))
         self.assertIn("unavailable", text)
+        self.assertIn("topic: changed", text)
         self.assertNotIn("SECRET", text)
         self.assertNotIn("password", text)
         self.assertNotIn("unexpected", text)
@@ -293,6 +360,70 @@ class AuditDetails(unittest.TestCase):
         recursive = []
         recursive.append(recursive)
         self.assertLess(len(admins._audit_value(recursive)), 200)
+
+    def test_lossy_collection_summary_still_reports_fourth_item_change(self):
+        old = [discord.Object(id=i) for i in (1, 2, 3, 4)]
+        new = [discord.Object(id=i) for i in (1, 2, 3, 99)]
+        text = admins.did(self.entry("onboarding_update",
+            before=types.SimpleNamespace(default_channels=old),
+            after=types.SimpleNamespace(default_channels=new)))
+        self.assertIn("default_channels: changed (shown:", text)
+        self.assertIn("+1 more", text)
+        self.assertLess(len(text), 1100)
+
+    def test_lossy_long_string_summary_still_reports_suffix_change(self):
+        text = admins.did(self.entry("guild_update",
+            before=types.SimpleNamespace(description="x" * 120 + "old suffix"),
+            after=types.SimpleNamespace(description="x" * 120 + "new suffix")))
+        self.assertIn("description: changed (shown:", text)
+        self.assertNotIn("old suffix", text)
+        self.assertNotIn("new suffix", text)
+        self.assertLess(len(text), 1100)
+
+    def test_hidden_prompt_options_and_type_changes_are_not_silent(self):
+        old = discord.OnboardingPrompt(type=discord.OnboardingPromptType.multiple_choice,
+            title="Pick games", options=[discord.OnboardingPromptOption(title="Old option")])
+        new = discord.OnboardingPrompt(type=discord.OnboardingPromptType.dropdown,
+            title="Pick games", options=[discord.OnboardingPromptOption(title="New option")])
+        text = admins.did(self.entry("onboarding_update",
+            before=types.SimpleNamespace(prompts=[old]),
+            after=types.SimpleNamespace(prompts=[new])))
+        self.assertIn("prompts: changed (shown:", text)
+
+    def test_lossy_unknown_values_never_invoke_comparison_or_repr(self):
+        class Hostile:
+            def __repr__(self):
+                raise AssertionError("must not repr payload")
+            def __str__(self):
+                raise AssertionError("must not stringify payload")
+            def __eq__(self, other):
+                raise AssertionError("must not compare payload")
+        text = admins.did(self.entry("role_update",
+            before=types.SimpleNamespace(name=Hostile()),
+            after=types.SimpleNamespace(name=Hostile())))
+        self.assertIn("name: changed (shown: unavailable)", text)
+        old, new = [], []
+        old.append(old)
+        new.append(new)
+        text = admins.did(self.entry("onboarding_update",
+            before=types.SimpleNamespace(default_channels=old),
+            after=types.SimpleNamespace(default_channels=new)))
+        self.assertIn("default_channels: changed (shown:", text)
+        self.assertLess(len(text), 1100)
+
+    def test_real_audit_diff_missing_old_and_new_values_are_none(self):
+        entry = self.entry("onboarding_prompt_update", discord.Object(id=123))
+        entry.changes = discord.AuditLogChanges(entry, [
+            {"key": "title", "new_value": "Pick games"},
+            {"key": "single_select", "old_value": True},
+            {"key": "required", "old_value": False, "new_value": True},
+        ])
+        self.assertIsNone(entry.changes.before.title)
+        self.assertIsNone(entry.changes.after.single_select)
+        text = admins.did(entry)
+        self.assertIn("title: none → Pick games", text)
+        self.assertIn("single_select: yes → none", text)
+        self.assertIn("required: no → yes", text)
 
     def test_unchanged_and_non_whitelisted_actions_keep_existing_wording(self):
         entry = self.entry("guild_update", before=types.SimpleNamespace(name="Same"),
