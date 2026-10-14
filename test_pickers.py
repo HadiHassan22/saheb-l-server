@@ -98,6 +98,13 @@ class WithGuild(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(problem)
         return await actions.carry_out(self.guild, action), action
 
+    def dropdown(self, view, held=()):
+        """The dropdown a member holding `held` sees on pressing Choose in
+        the #roles message showing `view`."""
+        button = view.children[0]
+        self.assertEqual(button.item.label, "Choose")
+        return pickers.choices(self.guild, pickers.get(button.no), held).children[0].item
+
 
 class Making(WithGuild):
     async def test_a_picker_makes_its_new_roles_and_is_posted_in_roles(self):
@@ -111,7 +118,7 @@ class Making(WithGuild):
         self.assertTrue(actions.voted_roles()[made.id]["joinable"])
         picker = pickers.find("where are you from?")
         self.assertEqual((picker["roles"], picker["one"]), ([10, made.id], True))
-        select = self.messages[0].sent[1]["view"].children[0].item
+        select = self.dropdown(self.messages[0].sent[1]["view"])
         self.assertEqual([o.label for o in select.options],
                          ["Lebanese", "International", "None of these"])
         self.assertEqual(select.max_values, 1)
@@ -135,7 +142,7 @@ class Making(WithGuild):
         said, _ = await self.carry_out(kind=actions.PICKER_EDIT, picker="From",
                                        roles=["Lebanese", "Syrian"], one=False)
         self.assertIn("From", said)
-        edited = self.messages[0].edited["view"].children[0].item
+        edited = self.dropdown(self.messages[0].edited["view"])
         self.assertEqual((len(edited.options), edited.max_values), (3, 3))
         await self.carry_out(kind=actions.PICKER_DELETE, picker="From")
         self.messages[0].delete.assert_awaited_once()
@@ -208,7 +215,7 @@ class OptIn(WithGuild):
         await self.carry_out(kind=actions.ROLE_CREATE, name="Gamers")
         picker = pickers.find(pickers.OPT_IN)
         self.assertEqual((picker["roles"], picker["one"]), ([self.roles[-1].id, 10], False))
-        options = self.messages[-1].sent[1]["view"].children[0].item.options
+        options = self.dropdown(self.messages[-1].sent[1]["view"]).options
         self.assertEqual([o.label for o in options], ["Gamers", "Lebanese", "None of these"])
         self.assertIn("Some open a channel", self.messages[-1].sent[0])
 
@@ -376,6 +383,48 @@ class Picking(WithGuild):
         self.assertEqual([o.id for o in member.add_roles.call_args.args], [10])
         self.assertEqual([o.id for o in member.remove_roles.call_args.args], [11])
         self.assertIn("Lebanese", sent[0])
+
+    def test_the_dropdown_starts_with_the_roles_the_member_holds(self):
+        store.save("roles", {"10": {"joinable": True}, "12": {"joinable": True}})
+        self.roles.append(role(12, "Syrian"))
+        several = pickers.save({"title": "From", "roles": [10, 12], "one": False,
+                                "message_id": None})
+        picked = [o.label for o in pickers.choices(self.guild, several, [12, 10, 11])
+                  .children[0].item.options if o.default]
+        self.assertEqual(picked, ["Lebanese", "Syrian"])
+        several["one"] = True  # a pick-one dropdown can show only one
+        picked = [o.label for o in pickers.choices(self.guild, several, [12, 10])
+                  .children[0].item.options if o.default]
+        self.assertEqual(picked, ["Lebanese"])
+        nothing = pickers.choices(self.guild, several, [11]).children[0].item
+        self.assertFalse(any(o.default for o in nothing.options))
+
+    async def test_choose_opens_the_dropdown_for_the_member_alone(self):
+        picker = pickers.save({"title": "From", "roles": [10], "one": True,
+                               "message_id": None})
+        send = mock.AsyncMock()
+        interaction = types.SimpleNamespace(
+            user=types.SimpleNamespace(roles=[self.lebanese]), guild=self.guild,
+            response=types.SimpleNamespace(send_message=send))
+        await pickers.PickerOpen(picker["no"]).callback(interaction)
+        self.assertTrue(send.call_args.kwargs["ephemeral"])
+        select = send.call_args.kwargs["view"].children[0].item
+        self.assertEqual([o.label for o in select.options if o.default], ["Lebanese"])
+
+    async def test_picking_in_your_own_dropdown_updates_it_in_place(self):
+        picker = pickers.save({"title": "From", "roles": [10, 11], "one": True,
+                               "message_id": None})
+        member = types.SimpleNamespace(roles=[self.lebanese], add_roles=mock.AsyncMock(),
+                                       remove_roles=mock.AsyncMock())
+        edit = mock.AsyncMock()
+        interaction = types.SimpleNamespace(
+            user=member, guild=self.guild, data={"values": ["11"]},
+            message=types.SimpleNamespace(flags=discord.MessageFlags(ephemeral=True)),
+            response=types.SimpleNamespace(edit_message=edit))
+        await pickers.PickerSelect(picker["no"]).callback(interaction)
+        self.assertIn("Teal", edit.call_args.kwargs["content"])
+        select = edit.call_args.kwargs["view"].children[0].item
+        self.assertEqual([o.label for o in select.options if o.default], ["Teal"])
 
     async def test_joining_by_asking_respects_a_pick_one_picker(self):
         store.save("roles", {"10": {"joinable": True}, "12": {"joinable": True}})

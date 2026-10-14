@@ -305,6 +305,11 @@ in `#ask-saheb`. A color only changes how a name looks: the roles carry no
 permissions, sit at the bottom of the role list, and a member holds one at
 a time. The list is in `colors.py`, so changing it is a proposal.
 
+Every picker in `#roles`, colors included, is a **Choose** button. It
+opens the dropdown for you alone, already showing the roles you hold, and
+picking updates it there; a dropdown everyone shares would look empty to
+everyone.
+
 Other pickers in `#roles` group the roles members give themselves. Asking
 for a role is for members boosting the server: anyone else is told to
 boost first. Ask for a role ("create a gamer role") and the bot files it
@@ -591,7 +596,7 @@ one changed, and is told why it wasn't kept.
 | `chat.py` | Talking to the bot anywhere it's tagged: rate limits, memory, and the File it and Ship it buttons |
 | `greetings.py` | The daily "ija el batal" greeting in one channel |
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
-| `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: one dropdown answers them all |
+| `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: a Choose button opens each one privately, filled in with your roles |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
 | `assistant.py` | What the bot may do when asked: 39 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |

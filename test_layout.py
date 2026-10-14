@@ -80,6 +80,16 @@ class Colors(unittest.TestCase):
         self.assertIn(bytes.fromhex("26a69aff"), rows)
         self.assertEqual(rows[1:5], bytes.fromhex("26a69a00"))  # a corner is clear
 
+    def test_the_dropdown_starts_with_the_members_color(self):
+        select = colors.Picker(worn="Qadisha").children[0]
+        self.assertEqual([o.label for o in select.options if o.default], ["Qadisha"])
+        select = colors.Picker(worn=colors.NONE).children[0]
+        self.assertEqual([o.label for o in select.options if o.default], [colors.NONE])
+        self.assertFalse(any(o.default for o in colors.Picker().children[0].options))
+        button = colors.Opener().children[0]
+        self.assertEqual(button.custom_id, "color-open")
+        self.assertLessEqual(len(button.label), 80)  # Discord's limit
+
     def test_every_color_says_what_it_looks_like(self):
         select = colors.Picker().children[0]
         self.assertEqual(select.options[3].description, "Teal")

@@ -1,6 +1,11 @@
 """Pickers in #roles: a dropdown where members give themselves roles, such
 as where they're from, their age group or what they play.
 
+A message in #roles is the same for everyone, so a dropdown on it can't
+show what each member already holds and always looks empty. Each picker in
+#roles is a Choose button instead; it opens the dropdown privately, filled
+in with the member's own roles, and picking updates it in place.
+
 A picker is data, not code: a title, the roles it offers, and whether a
 member picks one of them or several. It is made, changed and removed like
 any server change (actions.py), by a vote or at once by an admin, and one
@@ -241,17 +246,55 @@ class PickerSelect(discord.ui.DynamicItem[discord.ui.Select],
         names = [role.name for r in now if (role := interaction.guild.get_role(r))]
         said = (f"You now have: {', '.join(names)}." if names
                 else f"You have none of the {picker['title']} roles now.")
+        message = getattr(interaction, "message", None)
+        if message is not None and message.flags.ephemeral:
+            # The member's own copy: show the new roles in it.
+            return await interaction.response.edit_message(
+                content=said[:2000], view=choices(interaction.guild, picker, now))
         await interaction.response.send_message(said[:2000], ephemeral=True)
 
 
+class PickerOpen(discord.ui.DynamicItem[discord.ui.Button],
+                 template=r"picker-open:(?P<no>\d+)"):
+    """The Choose button under a picker in #roles. It opens the dropdown
+    for the member alone, with the roles they hold already picked."""
+
+    def __init__(self, no):
+        super().__init__(discord.ui.Button(
+            label="Choose", style=discord.ButtonStyle.primary, custom_id=f"picker-open:{no}"))
+        self.no = no
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(int(match["no"]))
+
+    async def callback(self, interaction):
+        picker = get(self.no)
+        if picker is None:
+            return await interaction.response.send_message(
+                "This picker has been removed.", ephemeral=True)
+        held = [r.id for r in interaction.user.roles]
+        await interaction.response.send_message(
+            text(picker), view=choices(interaction.guild, picker, held), ephemeral=True)
+
+
 def view(guild, picker):
-    """The dropdown for `picker`, listing the roles that still exist."""
-    options = [discord.SelectOption(label=role.name[:100], value=str(role.id))
-               for r in picker["roles"] if (role := guild.get_role(r))]
-    options.append(discord.SelectOption(label="None of these", value=NONE))
-    item = PickerSelect(picker["no"], options, picker["one"])
+    """What #roles shows under `picker`: the Choose button."""
     shown = discord.ui.View(timeout=None)
-    shown.add_item(item)
+    shown.add_item(PickerOpen(picker["no"]))
+    return shown
+
+
+def choices(guild, picker, held=()):
+    """The dropdown for `picker`, listing the roles that still exist, with
+    the ones in `held` already picked (only the first, if it's pick one)."""
+    roles = [role for r in picker["roles"] if (role := guild.get_role(r))]
+    picked = [role.id for role in roles if role.id in held][:1 if picker["one"] else None]
+    options = [discord.SelectOption(label=role.name[:100], value=str(role.id),
+                                    default=role.id in picked) for role in roles]
+    options.append(discord.SelectOption(label="None of these", value=NONE))
+    shown = discord.ui.View(timeout=None)
+    shown.add_item(PickerSelect(picker["no"], options, picker["one"]))
     return shown
 
 
@@ -310,4 +353,4 @@ async def install(guild):
 
 
 def setup(client):
-    client.add_dynamic_items(PickerSelect)
+    client.add_dynamic_items(PickerSelect, PickerOpen)
