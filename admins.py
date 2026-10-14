@@ -265,11 +265,127 @@ DID = {
 }
 
 
+# Only public configuration fields, never member answers or arbitrary payloads.
+_AUDIT_FIELDS = {
+    "onboarding": ("enabled", "mode", "default_channels", "prompts"),
+    "onboarding_prompt": ("title", "type", "single_select", "required",
+                          "in_onboarding", "options"),
+    "home_settings": ("enabled", "welcome_message", "resource_channels",
+                      "new_member_actions"),
+    "channel": ("name", "topic", "nsfw", "position", "slowmode_delay",
+                "bitrate", "user_limit", "default_auto_archive_duration"),
+    "role": ("name", "permissions", "colour", "hoist", "mentionable", "position"),
+    "guild": ("name", "description", "verification_level", "explicit_content_filter",
+              "default_notifications", "afk_timeout", "afk_channel", "system_channel",
+              "rules_channel", "public_updates_channel", "preferred_locale"),
+}
+_AUDIT_STRUCTURES = {
+    "prompts": ("id", "title", "required", "single_select", "in_onboarding"),
+    "options": ("id", "title", "channel_ids", "role_ids"),
+    "welcome_message": ("message",),  # not author IDs
+    "resource_channels": ("channel_id", "title"),
+    "new_member_actions": ("channel_id", "title", "action_type"),
+}
+_AUDIT_ENUMS = (discord.ChannelType, discord.VerificationLevel, discord.ContentFilter,
+                discord.NotificationLevel, discord.Locale, discord.OnboardingMode,
+                discord.OnboardingPromptType)
+
+
+def _audit_bound(value, limit):
+    return value[:limit] + ("…" if len(value) > limit else "")
+
+
+def _audit_text(value, limit=120):
+    """Bound public strings and neutralize formatting, mentions and controls."""
+    truncated = len(value) > limit
+    value = "".join(c if c.isprintable() else " " for c in value[:limit])
+    value = discord.utils.escape_markdown(value).replace("@", "@\u200b")
+    return value[:limit] + ("…" if truncated or len(value) > limit else "")
+
+
+def _audit_id(value):
+    return str(value) if type(value) is int and 0 <= value < 10**20 else None
+
+
+def _audit_value(value, field="", depth=0):
+    if depth > 4:
+        return "unavailable"
+    if field in _AUDIT_STRUCTURES and type(value) in (str, int, bool, set):
+        return "unavailable"
+    if value is None:
+        return "none"
+    if type(value) is bool:
+        return "yes" if value else "no"
+    if type(value) is int:
+        return _audit_id(value) or "unavailable"
+    if type(value) is str:
+        return _audit_text(value)
+    if isinstance(value, _AUDIT_ENUMS):
+        return _audit_text(value.name)
+    if isinstance(value, (discord.Permissions, discord.Colour)):
+        return _audit_id(value.value) or "unavailable"
+    if type(value) in (list, tuple):
+        items = [_audit_value(item, field, depth + 1) for item in value[:3]]
+        omitted = f"; +{len(value) - 3} more" if len(value) > 3 else ""
+        return "[" + _audit_bound("; ".join(items), 130) + omitted + "]"
+    if type(value) is set and field in ("channel_ids", "role_ids"):
+        return _audit_value(sorted(i for i in value if _audit_id(i)), field, depth + 1)
+    fields = _AUDIT_STRUCTURES.get(field)
+    if fields:
+        parts = []
+        for key in fields:
+            found = value.get(key) if type(value) is dict else getattr(value, key, None)
+            if found is not None:
+                parts.append(f"{key}={_audit_value(found, key, depth + 1)}")
+        return _audit_bound(", ".join(parts), 160) if parts else "unavailable"
+    # Cached public channel/role/guild references, including unresolved Objects.
+    ident = _audit_id(getattr(value, "id", None))
+    name = getattr(value, "name", None)
+    if ident:
+        return f"{_audit_text(name, 70)} (ID {ident})" if type(name) is str else f"ID {ident}"
+    return "unavailable"  # never repr() unknown objects or dictionaries
+
+
+def _audit_details(entry):
+    action = entry.action.name
+    group = next((key for key in _AUDIT_FIELDS
+                  if action in (f"{key}_create", f"{key}_update", f"{key}_delete")), None)
+    if group is None:
+        return ""
+    changes = getattr(entry, "changes", None)
+    before, after = getattr(changes, "before", None), getattr(changes, "after", None)
+    missing = object()
+    parts = []
+    for field in _AUDIT_FIELDS[group]:
+        old, new = getattr(before, field, missing), getattr(after, field, missing)
+        if old is missing and new is missing:
+            continue
+        old_text = "unset" if old is missing else _audit_value(old, field)
+        new_text = "unset" if new is missing else _audit_value(new, field)
+        if old_text != new_text:
+            parts.append(f"{field}: {old_text} → {new_text}")
+        if len(parts) == 6:
+            break
+    return (" [" + "; ".join(parts)[:800] + "]") if parts else ""
+
+
 def _target(entry):
-    target = entry.target
-    before = getattr(entry.changes, "before", None)
-    return (getattr(target, "mention", None) or getattr(target, "name", None)
-            or getattr(before, "name", None) or "something")
+    target = getattr(entry, "target", None)
+    changes = getattr(entry, "changes", None)
+    before = getattr(changes, "before", None)
+    mention = getattr(target, "mention", None)
+    ident = _audit_id(getattr(target, "id", None))
+    # Keep canonical Discord references; server_log already suppresses pings.
+    if ident and mention in (f"<@{ident}>", f"<@!{ident}>", f"<@&{ident}>", f"<#{ident}>"):
+        return mention
+    for value in (getattr(target, "name", None), getattr(before, "name", None)):
+        if type(value) is str and value:
+            return _audit_text(value)
+    action = entry.action.name
+    label = ("server onboarding prompt" if action.startswith("onboarding_prompt_") else
+             "server onboarding" if action.startswith("onboarding_") else
+             "server home settings" if action.startswith("home_settings_") else "target")
+    return f"{label} (ID {ident})" if ident else label
 
 
 def did(entry):
@@ -283,7 +399,7 @@ def did(entry):
         text = DID[entry.action].format(target=_target(entry))
     else:
         text = f"{entry.action.name.replace('_', ' ')} ({_target(entry)})"
-    return text
+    return text + _audit_details(entry)
 
 
 async def on_audit_log_entry(entry):

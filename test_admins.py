@@ -121,6 +121,18 @@ class AuditLog(WithTempData):
                                             after=types.SimpleNamespace(timed_out_until=until)))
         self.assertIn(f"timed out <@5> until <t:{int(until.timestamp())}:f>", said[0])
 
+    async def test_configuration_details_are_posted_without_changing_reasons_or_filters(self):
+        admins.add(ADMIN)
+        entry = self.entry(discord.AuditLogAction.onboarding_update, ADMIN, None,
+                           reason="Review setup", before=types.SimpleNamespace(enabled=False),
+                           after=types.SimpleNamespace(enabled=True))
+        said = await self.posted(entry)
+        self.assertEqual(len(said), 1)
+        self.assertIn("enabled: no → yes", said[0])
+        self.assertTrue(said[0].endswith(" Reason: Review setup"))
+        entry.guild.id = 100
+        self.assertEqual(await self.posted(entry), [])
+
     async def test_an_admin_changing_their_own_nickname_is_not_posted(self):
         admins.add(ADMIN)
         self.assertEqual(await self.posted(self.entry(discord.AuditLogAction.member_update,
@@ -147,6 +159,147 @@ class AuditLog(WithTempData):
         with mock.patch.object(admins, "_update_log_channel", mock.AsyncMock()):
             await self.posted(entry)
         self.assertFalse(admins.is_admin(8))
+
+
+class AuditDetails(unittest.TestCase):
+    def entry(self, action, target=None, before=None, after=None):
+        return types.SimpleNamespace(
+            action=getattr(discord.AuditLogAction, action), target=target,
+            changes=types.SimpleNamespace(before=before or types.SimpleNamespace(),
+                                          after=after or types.SimpleNamespace()))
+
+    def test_missing_targets_have_action_specific_fallbacks(self):
+        for action, label in (("onboarding_update", "server onboarding"),
+                              ("onboarding_prompt_create", "server onboarding prompt"),
+                              ("home_settings_update", "server home settings")):
+            with self.subTest(action=action):
+                entry = self.entry(action)
+                del entry.target
+                self.assertIn(label, admins.did(entry))
+                self.assertNotIn("something", admins.did(entry))
+        self.assertEqual(admins._target(self.entry("channel_delete")), "target")
+
+    def test_uncached_target_id_is_retained(self):
+        entry = self.entry("onboarding_prompt_update", discord.Object(id=12345))
+        self.assertIn("server onboarding prompt (ID 12345)", admins.did(entry))
+        self.assertEqual(admins._target(self.entry("role_delete", discord.Object(id=456))),
+                         "target (ID 456)")
+
+    def test_public_name_and_deleted_name_fallbacks(self):
+        self.assertEqual(admins._target(self.entry("channel_update",
+                         types.SimpleNamespace(name="general"))), "general")
+        self.assertEqual(admins._target(self.entry("role_delete",
+                         before=types.SimpleNamespace(name="Games"))), "Games")
+
+    def test_onboarding_configuration_before_and_after(self):
+        entry = self.entry("onboarding_update",
+                          before=types.SimpleNamespace(enabled=False, default_channels=[]),
+                          after=types.SimpleNamespace(enabled=True,
+                              mode=discord.OnboardingMode.advanced,
+                              default_channels=[discord.Object(id=42)]))
+        text = admins.did(entry)
+        self.assertIn("enabled: no → yes", text)
+        self.assertIn("mode: unset → advanced", text)
+        self.assertIn("default_channels: [] →", text)
+        self.assertIn("ID 42", text)
+
+    def test_prompt_public_configuration(self):
+        option = discord.OnboardingPromptOption(title="Games", roles=[123], channels=[42])
+        entry = self.entry("onboarding_prompt_update", discord.Object(id=5),
+                          before=types.SimpleNamespace(title="Interests", required=False),
+                          after=types.SimpleNamespace(title="Choose interests", required=True,
+                              single_select=False, in_onboarding=True, options=[option]))
+        text = admins.did(entry)
+        for fragment in ("Interests → Choose interests", "required: no → yes",
+                         "single_select: unset → no", "Games", "channel_ids=", "42",
+                         "role_ids=", "123"):
+            self.assertIn(fragment, text)
+
+    def test_onboarding_prompts_list_is_public_and_bounded(self):
+        prompt = discord.OnboardingPrompt(type=discord.OnboardingPromptType.multiple_choice,
+                                          title="Pick games", options=[])
+        text = admins.did(self.entry("onboarding_update",
+                                    after=types.SimpleNamespace(prompts=[prompt] * 20)))
+        self.assertIn("Pick games", text)
+        self.assertIn("+17 more", text)
+        self.assertLess(len(text), 1100)
+
+    def test_home_settings_nested_public_fields_only(self):
+        entry = self.entry("home_settings_update", after=types.SimpleNamespace(
+            enabled=True, welcome_message={"message": "Welcome", "author_ids": [9988],
+                                            "token": "DO_NOT_PRINT"},
+            resource_channels=[{"channel_id": "42", "title": "Rules",
+                                "access_token": "DO_NOT_PRINT"}],
+            new_member_actions=[{"channel_id": "43", "title": "Introduce yourself",
+                                 "action_type": 1, "responses": ["PRIVATE_ANSWER"]}]))
+        text = admins.did(entry)
+        for fragment in ("Welcome", "Rules", "42", "Introduce yourself", "action_type=1"):
+            self.assertIn(fragment, text)
+        for secret in ("9988", "author_ids", "token", "DO_NOT_PRINT", "PRIVATE_ANSWER"):
+            self.assertNotIn(secret, text)
+
+    def test_changed_public_channel_role_and_guild_fields(self):
+        cases = (("channel_update", "topic", "old topic", "new topic"),
+                 ("role_update", "mentionable", False, True),
+                 ("guild_update", "afk_timeout", 60, 300))
+        for action, field, old, new in cases:
+            with self.subTest(action=action):
+                text = admins.did(self.entry(action,
+                    before=types.SimpleNamespace(**{field: old}),
+                    after=types.SimpleNamespace(**{field: new})))
+                self.assertIn(field + ":", text)
+                self.assertIn(" → ", text)
+        text = admins.did(self.entry("role_update", after=types.SimpleNamespace(
+            permissions=discord.Permissions(administrator=True), colour=discord.Colour.red())))
+        self.assertIn("permissions: unset → 8", text)
+        self.assertIn("colour:", text)
+
+    def test_unexpected_fields_and_objects_are_not_dumped(self):
+        class Secret:
+            def __repr__(self):
+                raise AssertionError("must not repr arbitrary objects")
+            def __str__(self):
+                raise AssertionError("must not stringify arbitrary objects")
+        text = admins.did(self.entry("channel_update", after=types.SimpleNamespace(
+            topic=Secret(), token="SECRET_TOKEN", password="SECRET_PASSWORD",
+            unexpected={"secret": "SECRET_PAYLOAD"})))
+        self.assertIn("unavailable", text)
+        self.assertNotIn("SECRET", text)
+        self.assertNotIn("password", text)
+        self.assertNotIn("unexpected", text)
+
+    def test_member_answers_are_never_summarized(self):
+        answers = types.SimpleNamespace(responses="PRIVATE_ANSWER", answers="PRIVATE_ANSWER",
+                                        selected_options=["PRIVATE_ANSWER"], title="PRIVATE_ANSWER")
+        for action in ("member_update", "onboarding_update", "home_settings_update"):
+            self.assertNotIn("PRIVATE_ANSWER", admins.did(self.entry(action, after=answers)))
+        text = admins.did(self.entry("onboarding_prompt_update",
+                          after=types.SimpleNamespace(options=["PRIVATE_ANSWER"])))
+        self.assertNotIn("PRIVATE_ANSWER", text)
+
+    def test_hostile_strings_and_collections_are_bounded(self):
+        hostile = "@everyone <@123> **bold** \x00\n\u202e" + "x" * 10000
+        entry = self.entry("channel_update", types.SimpleNamespace(name=hostile),
+            after=types.SimpleNamespace(name=hostile, topic=hostile, nsfw=True,
+                position=2, slowmode_delay=3, bitrate=64000, user_limit=50))
+        text = admins.did(entry)
+        self.assertLess(len(text), 1100)
+        self.assertNotIn("@everyone", text)
+        self.assertNotIn("<@123>", text)
+        for control in ("\x00", "\n", "\u202e"):
+            self.assertNotIn(control, text)
+        self.assertNotIn("user_limit:", text)  # at most six changed fields
+        self.assertEqual(text, admins.did(entry))
+        recursive = []
+        recursive.append(recursive)
+        self.assertLess(len(admins._audit_value(recursive)), 200)
+
+    def test_unchanged_and_non_whitelisted_actions_keep_existing_wording(self):
+        entry = self.entry("guild_update", before=types.SimpleNamespace(name="Same"),
+                          after=types.SimpleNamespace(name="Same"))
+        self.assertEqual(admins.did(entry), "changed the server's settings")
+        entry = self.entry("kick", member(5), after=types.SimpleNamespace(name="ignored"))
+        self.assertEqual(admins.did(entry), "kicked <@5>")
 
 
 class Tools(WithTempData):
