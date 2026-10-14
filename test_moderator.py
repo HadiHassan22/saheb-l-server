@@ -18,6 +18,7 @@ import discord
 import admins
 import ai
 import cases
+import judge
 import layout
 import moderator
 import scold
@@ -221,6 +222,21 @@ class Flow(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("not yours to review", self.reviews[0])
         self.assertIsNone(cases.get(2))
         self.assertEqual(member.sent, [])
+
+    async def test_the_first_checks_warnings_never_add_up_to_a_timeout(self):
+        member = Member()
+        for _ in range(5):
+            cases.open_case(int(time.time()) - 600, user_id=member.id, action=cases.WARN,
+                            minutes=0, decided_by=judge.FIRST_CHECK)
+        self.review_answer = {"explanation": "Called a member a donkey."}
+        with mock.patch.object(moderator, "COOLDOWN", 0):
+            await self.run_alert(jev(1.8, harassment=0.96), member=member)
+        self.assertEqual(len(self.reviews), 1)
+        self.assertIn("not yours to review", self.reviews[0])  # Jev's warning stands
+        case = cases.get(6)
+        self.assertEqual((case["action"], case["record"]),
+                         (cases.WARN, {"warnings": 0, "timeouts": 0}))
+        self.assertIsNone(member.timed_out)
 
     async def test_a_severe_threat_holds_the_member_and_calls_the_admins(self):
         self.review_answer = {"violation": True, "rule": 3, "severity": "severe",

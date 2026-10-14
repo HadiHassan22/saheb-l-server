@@ -349,7 +349,8 @@ async def _post(guild, member, case, screening):
         name="Decided by",
         value=("a review, because a member flagged the message with 🚩"
                if case.get("flagged") else
-               "the first check, which was sure enough to act on its own"
+               "the first check, which was sure enough to act on its own. "
+               "A warning from it alone never counts towards a timeout"
                if case["decided_by"] == judge.FIRST_CHECK
                else "a second review, because the first check was unsure or "
                     "its verdict meant more than a warning"),
