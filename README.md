@@ -196,7 +196,7 @@ What a vote can order, carried out by code when it passes (`actions.py`):
 
 | Area | Changes |
 | --- | --- |
-| Channels and categories | create, rename, delete; a channel's topic and slowmode; clear a channel's message history; who can see a channel (everyone, or only members with some roles, made with it if new, which anyone can join) |
+| Channels and categories | create (text, voice or stage), rename, delete; a channel's topic and slowmode; clear a channel's message history; who can see a channel (everyone, or only members with some roles, made with it if new, which anyone can join) |
 | Roles | create (with a color, and whether members can join it), rename, recolor, delete: always cosmetic |
 | Pickers in `#roles` | create, change, remove a dropdown where members give themselves roles (pick one, or any); new roles are made with it |
 | Onboarding | the questions new members answer when they join (each answer shows channels and/or gives joinable roles), and the channels they see from the start |

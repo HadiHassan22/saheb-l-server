@@ -215,12 +215,12 @@ def _check_channel(guild, action):
             action["name"] = new
         return None
     if kind == CREATE:
-        voice = action.get("channel_type") == "voice"
+        voice = action.get("channel_type") in ("voice", "stage")
         name = str(action.get("name") or "").strip()[:100] if voice else text_name(action.get("name"))
         if not name or (not voice and not TEXT_NAME.match(name)):
             return "That isn't a usable channel name."
         action["name"] = name
-        action["channel_type"] = "voice" if voice else "text"
+        action["channel_type"] = action["channel_type"] if voice else "text"
         if any(c.name == name for c in guild.channels):
             return f"There's already a channel called {name}."
         category = discord.utils.get(guild.categories, name=action.get("category"))
@@ -247,7 +247,7 @@ def _check_channel(guild, action):
         return _pick_roles(guild, names if isinstance(names, list) else [names], action,
                            allow_none=True)
     if kind == RENAME:
-        voice = isinstance(target, discord.VoiceChannel)
+        voice = isinstance(target, (discord.VoiceChannel, discord.StageChannel))
         new = str(action.get("name") or "").strip()[:100] if voice else text_name(action.get("name"))
         if not new or new == target.name:
             return "That isn't a new usable name."
@@ -687,7 +687,7 @@ def describe(action):
     """(title, details) of the proposal for `action`."""
     kind, a = action["kind"], action
     lines = {
-        CREATE: lambda: (f"Create the {'voice ' if a['channel_type'] == 'voice' else ''}channel "
+        CREATE: lambda: (f"Create the {'' if a['channel_type'] == 'text' else a['channel_type'] + ' '}channel "
                          f"{a['name']}", f"Create **{a['name']}** in {a['category']}."
                          + (f" Topic: {a['topic']}" if a.get("topic") else "")
                          + (f" Slowmode: {a['slowmode']} seconds." if a.get("slowmode") else "")),
@@ -859,6 +859,8 @@ async def _carry_out(guild, action):
         category = discord.utils.get(guild.categories, name=a["category"])
         if a["channel_type"] == "voice":
             made = await guild.create_voice_channel(a["name"], category=category, reason=REASON)
+        elif a["channel_type"] == "stage":
+            made = await guild.create_stage_channel(a["name"], category=category, reason=REASON)
         else:
             made = await guild.create_text_channel(
                 a["name"], category=category, topic=a.get("topic") or None,

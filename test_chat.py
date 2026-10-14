@@ -96,6 +96,12 @@ class Checks(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(problem)
         self.assertEqual((action["name"], action["channel_type"]), ("anime-manga", "text"))
 
+    def test_a_stage_channel_keeps_its_name_as_a_voice_channel_does(self):
+        problem, action = self.check(kind=actions.CREATE, name="Friday Panel",
+                                     category="Hangout", channel_type="stage")
+        self.assertIsNone(problem)
+        self.assertEqual((action["name"], action["channel_type"]), ("Friday Panel", "stage"))
+
     def test_creating_needs_a_new_name_and_a_real_category(self):
         self.assertIn("already", self.check(kind=actions.CREATE, name="cars",
                                             category="Hangout")[0])
@@ -754,6 +760,22 @@ class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Proposal 3", logged.call_args.args[1])
         self.guild.create_text_channel.assert_awaited_once()
         self.assertIn("<#50> is open", said)
+
+    async def test_a_passed_stage_channel_is_made_as_a_stage_channel(self):
+        made = fake(discord.StageChannel, 51, "Friday Panel", mention="<#51>")
+        create_stage = mock.create_autospec(discord.Guild, instance=True).create_stage_channel
+        create_stage.return_value = made
+        self.guild.create_stage_channel = create_stage
+        action = {"kind": actions.CREATE, "name": "Friday Panel", "category": "Hangout",
+                  "channel_type": "stage"}
+        await actions.check(self.guild, action)
+        p = {"kind": proposals.ACTION, "status": proposals.PASSED, "no": 4, "action": action,
+             "title": "Create the stage channel Friday Panel"}
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()):
+            said = await actions.KIND.carry_out(None, self.guild, p)
+        create_stage.assert_awaited_once_with("Friday Panel", category=self.guild.categories[0],
+                                              reason=actions.REASON)
+        self.assertIn("<#51> is open", said)
 
     async def test_purging_deletes_every_message_and_leaves_the_channel(self):
         cars = self.guild.channels[3]

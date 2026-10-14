@@ -178,7 +178,7 @@ TOOLS = [
                 "name), delete_category (category).",
                 actions.CHANNEL_KINDS,
                 {"channel": S, "category": S, "name": S,
-                 "channel_type": {"type": "string", "enum": ["text", "voice"]},
+                 "channel_type": {"type": "string", "enum": ["text", "voice", "stage"]},
                  "topic": S, "slowmode": I, "roles": {"type": "array", "items": S}}),
     _draft_tool("draft_role_change",
                 "Draft a proposal about a role. Roles give no powers, and only a member "
