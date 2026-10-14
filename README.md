@@ -182,6 +182,9 @@ file attached the same way can become a sound on the soundboard (see
 code decides what is allowed: every tool is in one of four tiers, fixed in
 `assistant.py`.
 
+Asked who Nabih Berri is, the bot replies "tej rasak" at once, without the
+model. That still counts towards the chat limit (`chat.py`).
+
 | Tier | Rule | What |
 | --- | --- | --- |
 | Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases, onboarding |
