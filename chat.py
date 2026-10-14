@@ -15,6 +15,7 @@ answer costs the owner's AI budget. An admin can switch the limit off with
 
 import collections
 import logging
+import re
 import time
 
 import discord
@@ -32,9 +33,17 @@ log = logging.getLogger("chat")
 
 PER_WINDOW, WINDOW = 20, 10 * 60     # messages per member per window
 MEMORY, MEMORY_TTL = 6, 30 * 60       # turns kept per member, and for how long
+BERRI_REPLY = "tej rasak"
+_BERRI = re.compile(r"nabih\s+b\w*r{1,2}[iy]|نبيه\s+بري", re.IGNORECASE)
+_WHO = re.compile(r"\bwho\b|\bmeen\b|مين|من هو|من هي", re.IGNORECASE)
 
 _asked = collections.defaultdict(collections.deque)
 _memory = {}
+
+
+def asks_who_berri_is(text):
+    """True if the words ask who Nabih Berri is, in English, Arabizi or Arabic."""
+    return bool(_BERRI.search(text) and _WHO.search(text))
 
 
 def limited():
@@ -202,6 +211,8 @@ async def on_message(message, client=None):
                             attachments=list(message.attachments) + theirs,
                             client=client, admin=admin)
     text = strip_tag(message.content, me)[:1500] or "(tagged you with no text)"
+    if asks_who_berri_is(text):
+        return await message.reply(BERRI_REPLY, mention_author=False)
     others = [m for m in message.mentions if m.id != me.id]
     if others:
         # The model sees raw mentions; name them, so a draft about a member

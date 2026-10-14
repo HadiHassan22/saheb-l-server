@@ -534,7 +534,7 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
                   attachments=()):
         """Post `content` in a channel (#ask-saheb unless `channel_id` says
         otherwise) and return what the bot answered, or None if it stayed
-        quiet."""
+        quiet. A fixed reply counts as an answer, and the model isn't asked."""
         role = mock.Mock(spec=discord.Role, id=600)
         role.is_bot_managed.return_value = True
         me = types.SimpleNamespace(id=500, roles=[role])
@@ -559,8 +559,7 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(assistant, "respond", respond):
             await chat.on_message(message)
         if not respond.await_count:
-            message.reply.assert_not_awaited()
-            return None
+            return message.reply.await_args.args[0] if message.reply.await_count else None
         self.shown = respond.call_args.args[0].attachments
         return respond.call_args.args[2]
 
@@ -598,6 +597,16 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
                               attachments=[own])
         self.assertEqual(self.shown, [own, picture])
         self.assertIn("number 2)", text)
+
+    async def test_asked_who_nabih_berri_is_the_answer_is_tej_rasak(self):
+        self.assertEqual(await self.say("<@500> who is Nabih Berri?", mentions=["me"]),
+                         "tej rasak")
+        self.assertEqual(await self.say("<@500> meen nabih berry", mentions=["me"]),
+                         "tej rasak")
+        self.assertEqual(await self.say("<@500> مين نبيه بري؟", mentions=["me"]), "tej rasak")
+        self.assertEqual(await self.say("<@500> nabih berri is the speaker", mentions=["me"]),
+                         "nabih berri is the speaker")
+        self.assertIsNone(await self.say("who is Nabih Berri?"))
 
     async def test_it_answers_in_any_channel_but_only_when_tagged(self):
         general = 6
