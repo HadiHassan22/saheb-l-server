@@ -8,6 +8,10 @@ it is a proposal like any other.
 A dropdown can only show text and an emoji, so each color gets a dot of
 its exact color as an emoji. They are the bot's own (application) emojis,
 drawn here, and use none of the server's emoji slots.
+
+#roles shows a button rather than the dropdown itself: a shared dropdown
+can't show each member their own color, so the button opens it privately
+with the member's color already picked.
 """
 
 import logging
@@ -49,6 +53,7 @@ COOLDOWN = 10  # seconds between changes, per member
 
 _last_change = {}
 _client = None  # set by setup(); uploading emojis needs it
+_dots = {}  # {color name: emoji}, found when #roles is set up
 SWATCH = "swatch_"
 DOT = 64  # pixels
 
@@ -144,7 +149,9 @@ async def install(guild, roles_channel):
 
     if roles_channel is None:
         return
-    picker = Picker(await _swatches())
+    _dots.clear()
+    _dots.update(await _swatches())
+    picker = Opener()
     message = None
     if saved["message"]:
         try:
@@ -161,46 +168,79 @@ async def install(guild, roles_channel):
         await message.edit(content=text, view=picker, allowed_mentions=quiet)
 
 
+def wearing(member):
+    """The name of the color `member` wears, or NONE."""
+    held = {r.id for r in member.roles}
+    return next((name for name, rid in _saved()["roles"].items() if rid in held), NONE)
+
+
 async def wear(member, name):
     """Give `member` the color `name` (or NONE) and take off any other.
     Returns what to tell them."""
+    said, _ = await _wear(member, name)
+    return said
+
+
+async def _wear(member, name):
+    """What `wear` says, and whether the color changed."""
     now = time.time()
     if now - _last_change.get(member.id, 0) < COOLDOWN:
-        return "You just changed your color. Try again in a few seconds."
+        return "You just changed your color. Try again in a few seconds.", False
     ids = _saved()["roles"]
     chosen = ids.get(name) if name != NONE else None
     if name != NONE and chosen is None:
-        return "That color isn't available."
+        return "That color isn't available.", False
     add, remove = changes([r.id for r in member.roles], chosen, set(ids.values()))
     if remove:
         await member.remove_roles(*[discord.Object(r) for r in remove], reason="Name color")
     if add:
         await member.add_roles(*[discord.Object(r) for r in add], reason="Name color")
     _last_change[member.id] = now
-    return "Your color is removed." if chosen is None else f"You're now **{name}**."
+    return ("Your color is removed." if chosen is None else f"You're now **{name}**."), True
 
 
 class Picker(discord.ui.View):
-    """The dropdown in #roles. Persistent: it keeps working across restarts.
-    `dots` is {color name: emoji}; the view registered at startup only
-    needs to answer, so it has none."""
+    """The color dropdown, which a member sees alone. Persistent: it keeps
+    working across restarts. `dots` is {color name: emoji} and `worn` the
+    member's color; the view registered at startup only needs to answer,
+    so it has neither."""
 
-    def __init__(self, dots=None):
+    def __init__(self, dots=None, worn=None):
         super().__init__(timeout=None)
         dots = dots or {}
         select = discord.ui.Select(
             custom_id="color-picker", placeholder="Choose a name color",
             options=[discord.SelectOption(label=name, value=name, description=look.capitalize(),
-                                          emoji=dots.get(name))
+                                          emoji=dots.get(name), default=name == worn)
                      for name, _, look in COLORS]
-            + [discord.SelectOption(label=NONE, value=NONE)])
+            + [discord.SelectOption(label=NONE, value=NONE, default=worn == NONE)])
         select.callback = self.picked
         self.add_item(select)
 
     async def picked(self, interaction):
         name = interaction.data["values"][0]
-        await interaction.response.send_message(await wear(interaction.user, name),
-                                                ephemeral=True)
+        said, changed = await _wear(interaction.user, name)
+        message = getattr(interaction, "message", None)
+        if message is not None and message.flags.ephemeral:
+            worn = name if changed else wearing(interaction.user)
+            return await interaction.response.edit_message(
+                content=said, view=Picker(_dots, worn))
+        await interaction.response.send_message(said, ephemeral=True)
+
+
+class Opener(discord.ui.View):
+    """The button in #roles that opens the color dropdown for the member
+    who pressed it. Persistent, like the dropdown."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Choose a name color", style=discord.ButtonStyle.primary,
+                       custom_id="color-open")
+    async def open(self, interaction, button):
+        await interaction.response.send_message(
+            "**Your name color**", view=Picker(_dots, wearing(interaction.user)),
+            ephemeral=True)
 
 
 @app_commands.command(name="color", description="Pick your name color")
@@ -216,4 +256,5 @@ def setup(client, tree):
     global _client
     _client = client
     client.add_view(Picker())
+    client.add_view(Opener())
     tree.add_command(color)
