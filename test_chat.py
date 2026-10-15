@@ -195,7 +195,8 @@ class Tiers(unittest.TestCase):
         for tool in assistant.TOOLS:
             keys = set(tool["parameters"]["properties"])
             self.assertFalse(keys & {"user", "user_id", "target"}, tool["name"])
-            if assistant.TIER[tool["name"]] != assistant.DRAFT:
+            # Showing someone's avatar names them but does nothing to them.
+            if assistant.TIER[tool["name"]] != assistant.DRAFT and tool["name"] != "get_avatar":
                 self.assertNotIn("member", keys, tool["name"])
         member_tool = next(t for t in assistant.TOOLS if t["name"] == "draft_member_action")
         self.assertIn("reason", member_tool["parameters"]["required"])
@@ -267,6 +268,45 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.drafts, [])
         result = tool_result(calls)
         self.assertIn("depends on", result["error"])
+
+    async def test_renaming_yourself_happens_at_once_even_as_a_draft(self):
+        ctx = self.ctx()
+        ctx.member.edit = mock.AsyncMock()
+        result = json.loads(await assistant.run_tool(
+            ctx, "draft_rename_member", {"member": "<@7>", "nickname": "Abu Ali",
+                                         "reason": "I want it"}))
+        ctx.member.edit.assert_awaited_once_with(nick="Abu Ali", reason="Asked for it")
+        self.assertEqual(result["result"], "Your nickname is now Abu Ali.")
+        self.assertEqual(ctx.drafts, [])
+
+    def with_members(self, *members):
+        self.guild.get_member = lambda mid: next((m for m in members if m.id == mid), None)
+
+    async def test_av_with_a_mention_shows_that_members_avatar_under_the_reply(self):
+        karim = fake(discord.Member, 8, "Karim", display_name="Karim",
+                     display_avatar=types.SimpleNamespace(url="https://cdn.example/karim.png"))
+        self.with_members(karim)
+        ctx, answer, calls = await self.talk(
+            reply(calls=[("get_avatar", {"member": "<@8>"})]),
+            reply("Here's Karim."), text="av <@8>\n(Mentioned: Karim = <@8>)")
+        self.assertEqual([e.image.url for e in ctx.embeds], ["https://cdn.example/karim.png"])
+        self.assertEqual(ctx.embeds[0].title, "Karim's avatar")
+        self.assertIn("result", tool_result(calls))
+        self.assertEqual(answer, "Here's Karim.")
+
+    async def test_av_alone_shows_the_askers_own_avatar(self):
+        self.with_members()
+        ctx = self.ctx()
+        ctx.member.display_avatar = types.SimpleNamespace(url="https://cdn.example/hadi.png")
+        await assistant.run_tool(ctx, "get_avatar", {})
+        self.assertEqual([e.image.url for e in ctx.embeds], ["https://cdn.example/hadi.png"])
+
+    async def test_av_of_someone_not_in_the_server_shows_nothing(self):
+        self.with_members()
+        ctx = self.ctx()
+        result = json.loads(await assistant.run_tool(ctx, "get_avatar", {"member": "<@404>"}))
+        self.assertIn("Mention the member", result["error"])
+        self.assertEqual(ctx.embeds, [])
 
     async def test_unknown_tools_and_endless_tool_loops_are_stopped(self):
         _, answer, _ = await self.talk(
@@ -537,7 +577,7 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chat.history(5, NOW + chat.MEMORY_TTL + 1), [])
 
     async def say(self, content, mentions=(), roles=(), reply_to=None, channel_id=5,
-                  attachments=()):
+                  attachments=(), answering=None):
         """Post `content` in a channel (#ask-saheb unless `channel_id` says
         otherwise) and return what the bot answered, or None if it stayed
         quiet. A fixed reply counts as an answer, and the model isn't asked."""
@@ -558,7 +598,8 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
             mentions=[me if m == "me" else m for m in mentions],
             role_mentions=[role if r == "me" else r for r in roles],
             reply=mock.AsyncMock())
-        respond = mock.AsyncMock(return_value="Hi Rami")
+        respond = mock.AsyncMock(side_effect=answering, return_value="Hi Rami")
+        self.message = message
         with mock.patch.object(layout, "home_id", lambda: 99), \
                 mock.patch.object(layout, "channel",
                                   lambda g, name: types.SimpleNamespace(id=5)), \
@@ -584,6 +625,17 @@ class Chat(WithTempData, unittest.IsolatedAsyncioTestCase):
         text = await self.say("and to pass?", reply_to=mine)
         self.assertIn("and to pass?", text)
         self.assertIn("The quorum is 5.", text)
+
+    async def test_an_avatar_the_model_showed_goes_under_the_reply(self):
+        picture = discord.Embed(title="Karim's avatar")
+
+        async def show(ctx, history, text):
+            ctx.embeds.append(picture)
+            return "Here's Karim."
+        await self.say("<@500> av", mentions=["me"], answering=show)
+        sent = self.message.reply.await_args
+        self.assertEqual(sent.args[0], "Here's Karim.")
+        self.assertEqual(sent.kwargs["embeds"], [picture])
 
     async def test_tagged_in_a_reply_it_reads_the_message_and_sees_its_picture(self):
         """Someone posts a picture, another member replies "@Saheb make this

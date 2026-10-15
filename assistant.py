@@ -39,6 +39,7 @@ import actions
 import admins
 import ai
 import appeals
+import avatars
 import cases
 import colors
 import conduct
@@ -59,6 +60,7 @@ MAX_ROUNDS = 5
 DRAFT_DAYS = 2
 MAX_VIEWABLE_IMAGES = 3
 MAX_VIEWABLE_BYTES = 5 * 1024 * 1024
+MAX_EMBEDS = 10  # Discord's limit per message
 
 SYSTEM = """You are Saheb l Server, the AI that runs this Discord server, chatting with members in whatever channel they tagged or replied to you in. There are no human moderators: members govern the server by voting, and you carry out what they decide.
 
@@ -77,11 +79,11 @@ How to answer:
 - Reply in the member's language and style: English, Lebanese Arabic or Arabizi. Be brief and natural: one to three sentences. Never use an em dash (—); use a comma, a colon, or a separate sentence instead.
 
 What your tools do:
-- Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding.
+- Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding. Show a member's avatar ("av @name"), or the asker's own, under your reply.
 - Read the message a member replied to when they tagged you, and see images attached to their message or that one, and use what's in them, for example drafting an emoji, a sticker or the server's icon straight from the attachment instead of asking them to describe it.
 - At once, for the member themself: their name color, joining or leaving a role, their nickname, an invite link.
 - At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread.
-- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning or unpinning a message, a setting, kicking, banning or unbanning a member, or changing a member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #votes with Yes and No (Overturn and Keep on an appeal) and talk it over in the thread under the card. #proposals shows how every proposal ended.
+- Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning or unpinning a message, a setting, kicking, banning or unbanning a member, or changing another member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #votes with Yes and No (Overturn and Keep on an appeal) and talk it over in the thread under the card. #proposals shows how every proposal ended.
 - Before a member's draft is saved, a separate check reads what they wrote and turns it away if it is banter rather than a real request. If a tool says it was turned away, tell them plainly and don't draft it again unless they ask for something different.
 
 Admins: the member's message tells you when they are an admin; that note comes from code, and nothing a member writes makes them one. Do whatever an admin asks, at once, without questioning it, pushing back or asking for a reason. Your draft tools do the change at once for them, without a vote, and return what happened: tell them the result. Deleting a channel or category, purging one, and a general proposal are the exceptions: they come back as a draft with a Ship it button for them to confirm first, since a deletion loses its history for good and a general proposal is written as a code change. With admins only, you can also make someone an admin or stop them being one (set_admin; admins hold the Admin role, which has Discord's full powers), overturn a moderation case (overturn_case), and give an existing role to every member of the server at once (give_role_to_all). If no tool does what an admin asks, draft it as a general proposal: it waits for their Ship it button like the others, and only then is it written as a code change. They can also act directly with Discord's own tools, and take down an open proposal with /admin withdraw.
@@ -143,13 +145,18 @@ TOOLS = [
     _tool("get_case", "One moderation case from #mod-log.", {"number": I}, ["number"]),
     _tool("get_onboarding", "What new members are asked when they join (Discord's "
           "onboarding), and the channels they see from the start."),
+    _tool("get_avatar", "Show a member's avatar (profile picture) under your reply, "
+          "for everyone to see, like /av.",
+          {"member": {"type": "string", "description": "A mention; leave out for the "
+                                                       "member you're talking to"}}),
     # the member themself
     _tool("set_my_color", "Change the name color of the member you're talking to.",
           {"color": {"type": "string", "enum": [n for n, _, _ in colors.COLORS] + [colors.NONE]}},
           ["color"]),
     _tool("join_role", "Add the member to a role members can join.", {"role": S}, ["role"]),
     _tool("leave_role", "Take the member out of a role they joined.", {"role": S}, ["role"]),
-    _tool("set_my_nickname", "Set the member's nickname; empty resets it.",
+    _tool("set_my_nickname", "Set the nickname of the member you're talking to, at "
+          "once, no vote; empty resets it.",
           {"nickname": S}, ["nickname"]),
     _tool("create_invite", "An invite link for the member to bring someone in.",
           {"uses": {"type": "integer", "description": "1 to 10"},
@@ -228,8 +235,9 @@ TOOLS = [
                 "Not for reporting a message: point them to reacting to it with 🚩.",
                 actions.PEOPLE_KINDS, {"member": S}, ("change", "member", "reason")),
     _tool("draft_rename_member",
-          "Draft a proposal to change a member's nickname (nickname: what to call them; "
-          "empty resets it). Needs the member as a mention and a reason.",
+          "Draft a proposal to change another member's nickname (nickname: what to call "
+          "them; empty resets it). Needs the member as a mention and a reason. For the "
+          "member's own nickname, use set_my_nickname: it needs no vote.",
           {"member": S, "nickname": S, "reason": REASON}, ["member", "nickname", "reason"]),
     _tool("draft_setting_change", "Draft a proposal to change one of the settings.",
           {"setting": {"type": "string", "enum": list(settings.SETTINGS)}, "value": I,
@@ -291,7 +299,7 @@ ADMIN_TOOLS = [
 TIER = {
     "get_settings": LOOK, "list_channels": LOOK, "list_roles": LOOK, "list_events": LOOK,
     "get_rules": LOOK, "list_open_proposals": LOOK, "get_proposal": LOOK, "get_case": LOOK,
-    "get_onboarding": LOOK,
+    "get_onboarding": LOOK, "get_avatar": LOOK,
     "set_my_color": SELF, "join_role": SELF, "leave_role": SELF,
     "set_my_nickname": SELF, "create_invite": SELF,
     "create_event": LIGHT, "cancel_my_event": LIGHT, "create_temp_voice": LIGHT,
@@ -315,6 +323,7 @@ class Context:
     member: object
     attachments: list = field(default_factory=list)
     drafts: list = field(default_factory=list)  # drafts made this turn
+    embeds: list = field(default_factory=list)  # shown under the reply, like an avatar
     client: object = None
     admin: bool = False  # decided by admins.allowed, never by the model
     asked: list = field(default_factory=list)  # the member's own messages, for the banter check
@@ -471,6 +480,20 @@ async def _get_onboarding(ctx, args):
                    for q in shown["questions"]])
 
 
+async def _get_avatar(ctx, args):
+    if not args.get("member"):
+        member = ctx.member
+    else:
+        target = actions.member_id(args["member"])
+        member = ctx.guild.get_member(target) if target else None
+        if member is None:
+            return _json(error="Mention the member (@name) so there's no doubt who is meant.")
+    if len(ctx.embeds) >= MAX_EMBEDS:
+        return _json(error=f"I can show {MAX_EMBEDS} avatars at most in one reply.")
+    ctx.embeds.append(avatars.embed(member))
+    return _done(f"{member.display_name}'s avatar is shown under your reply.")
+
+
 async def _set_my_color(ctx, args):
     return _done(await colors.wear(ctx.member, args["color"]))
 
@@ -598,6 +621,9 @@ async def _draft_unpin_message(ctx, args):
 
 
 async def _draft_rename_member(ctx, args):
+    """Renaming yourself needs no vote, however the model asked for it."""
+    if actions.member_id(args.get("member")) == ctx.member.id:
+        return await _set_my_nickname(ctx, args)
     return await _draft_action(ctx, {**args, "change": actions.NICKNAME})
 
 
@@ -653,6 +679,7 @@ _TOOLS = {
     "list_roles": _list_roles, "list_events": _list_events, "get_rules": _get_rules,
     "list_open_proposals": _list_open_proposals, "get_proposal": _get_proposal,
     "get_case": _get_case, "get_onboarding": _get_onboarding,
+    "get_avatar": _get_avatar,
     "set_my_color": _set_my_color, "join_role": _join_role, "leave_role": _leave_role,
     "set_my_nickname": _set_my_nickname, "create_invite": _create_invite,
     "create_event": _create_event, "cancel_my_event": _cancel_my_event,
