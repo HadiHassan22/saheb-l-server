@@ -246,7 +246,8 @@ async def on_message(message, client=None):
         return await message.reply("I couldn't think just now. Try again in a minute.",
                                    mention_author=False)
     remember(message.author.id, now, f"{message.author.display_name}: {text}", answer)
-    await message.reply(answer[:2000], view=drafts_view(ctx.drafts, admin),
+    await message.reply(answer[:2000], embeds=ctx.embeds,
+                        view=drafts_view(ctx.drafts, admin),
                         mention_author=False,
                         allowed_mentions=discord.AllowedMentions.none())
 

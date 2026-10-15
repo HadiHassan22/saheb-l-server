@@ -61,7 +61,8 @@ until you press the button, and it can't change anything for everyone
 without a vote.
 
 **Avatars.** `/av` posts a member's avatar for everyone to see: pick a
-member with it, or leave it out to see your own.
+member with it, or leave it out to see your own. You can also tag Saheb
+and say "av @someone" (or just "av" for yours).
 
 **Appeals.** Think the bot got it wrong? Use `/appeal` with the case
 number, or the Appeal button in its message to you. The community votes,
@@ -629,7 +630,7 @@ one changed, and is told why it wasn't kept.
 | `scold.py` | Saheb's telling-off reply to a message the moderator acted on, and its reply to a 🚩 that broke no rule; no Discord |
 | `cases.py` | Numbered moderation cases and each member's record |
 | `appeals.py` | `/appeal`, the Appeal button, and the appeal kind of proposal |
-| `avatars.py` | `/av`, which shows a member's avatar (or your own) |
+| `avatars.py` | `/av`, which shows a member's avatar (or your own); Saheb shows the same when asked in chat |
 | `ai.py` | The OpenRouter key, the two model calls, and the monthly budget (protected) |
 | `providers.py` | One interface over OpenRouter, Claude, Gemini and Grok |
 | `store.py` | Saves state as JSON files on the volume (protected) |
