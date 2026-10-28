@@ -463,6 +463,40 @@ class Conversation(WithTempData, unittest.IsolatedAsyncioTestCase):
         self.assertIn("Ship it", deleting["note"])
         self.assertEqual([d["title"] for d in ctx.drafts], ["Delete cars"])
 
+    async def test_an_admin_asking_for_a_vote_gets_a_draft_not_a_ban(self):
+        async def found(guild, action):
+            action.update(member=9, member_name="X")
+        ctx = assistant.Context(guild=self.guild, member=types.SimpleNamespace(
+            id=7, display_name="Hadi"), admin=True)
+        with mock.patch.object(ai, "converse", mock.AsyncMock(side_effect=[
+                reply(calls=[("draft_member_action", {"change": "ban_member", "member": "<@9>",
+                                                      "reason": "Spam", "vote": True})]),
+                reply("File it to open the vote.")])) as calls, \
+                mock.patch("actions.check", mock.AsyncMock(side_effect=found)), \
+                mock.patch("voting_ui.ship", mock.AsyncMock()) as ship:
+            await assistant.respond(ctx, [], "open a vote to ban <@9>")
+        ship.assert_not_awaited()
+        self.assertEqual(proposals.all_proposals(), [])
+        self.assertEqual(len(ctx.drafts), 1)
+        self.assertNotIn("vote", ctx.drafts[0]["payload"])
+        self.assertIn("File it", tool_result(calls)["note"])
+
+    def test_only_admins_are_offered_the_vote_choice(self):
+        def offered(tools):
+            return {t["name"] for t in tools if "vote" in t["parameters"]["properties"]}
+        self.assertEqual(offered(assistant.tools(False)), set())
+        self.assertEqual(offered(assistant.tools(True)), {
+            name for name, tier in assistant.TIER.items() if tier == assistant.DRAFT})
+
+    async def test_vote_means_nothing_from_a_member(self):
+        ctx = assistant.Context(guild=self.guild, member=types.SimpleNamespace(
+            id=8, display_name="Ali"))
+        await assistant.run_tool(ctx, "draft_setting_change",
+                                 {"setting": "quorum", "value": 8, "vote": True})
+        self.assertFalse(ctx.vote)
+        self.assertEqual(len(ctx.drafts), 1)
+        self.assertNotIn("vote", ctx.drafts[0]["payload"])
+
     async def test_an_admins_code_change_is_confirmed_before_it_is_filed(self):
         ctx = assistant.Context(guild=self.guild, member=types.SimpleNamespace(
             id=7, display_name="Hadi"), admin=True)
