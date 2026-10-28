@@ -32,7 +32,9 @@ do anything a vote can, at once and without a vote: they ask the bot in
 channels, roles, settings or the rules, kicking or banning, overturning a
 moderation case, making someone an admin, or having the bot's code
 changed. Deleting a channel or category, or a code change, waits for
-them to confirm. They can also take down any open proposal. The Admin role is the only role
+them to confirm. If they ask for a vote instead ("open a vote to ban
+X"), they get a draft to file like anyone, and members decide. They can
+also take down any open proposal. The Admin role is the only role
 with Discord's own powers (Administrator), so they can also act directly;
 the bot keeps that role on the admins alone. Everything they do, through
 the bot or directly (read from Discord's audit log), is posted in
@@ -234,6 +236,8 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   vote, and the bot says what came of it. Admins also get three tools
   members don't: making or removing admins, overturning a moderation
   case, and giving an existing role to every member at once.
+  An admin who asks for a vote rather than the change itself gets a
+  draft with a **File it** button, and members vote on it as usual.
   Deleting a channel or category, clearing a channel's history, and a
   general proposal (which becomes a code change) are the exceptions: they
   come back as a draft with a **Ship it** button to confirm first, since
