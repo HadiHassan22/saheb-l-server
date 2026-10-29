@@ -17,11 +17,13 @@ import discord
 
 import admins
 import ai
+import appeals
 import cases
 import judge
 import layout
 import moderator
 import scold
+import settings
 import store
 
 OWNER, BOT_ROLE, MEMBER_ROLE = 1, 10, 0
@@ -425,6 +427,63 @@ class Flow(unittest.IsolatedAsyncioTestCase):
                                                  content="i want to kill myself")
         self.assertIn("1564", member.sent[0])
         self.assertEqual((message.replies, self.scolds), ([], []))
+
+
+class AdminWarnings(unittest.IsolatedAsyncioTestCase):
+    """A warning an admin gives on command: a case like any other, told to
+    the member, posted in #mod-log, and counted on the record."""
+
+    def setUp(self):
+        self._saved_dir = store.DATA_DIR
+        self._tmp = tempfile.mkdtemp()
+        store.DATA_DIR = Path(self._tmp)
+        message = mock.create_autospec(discord.Message, instance=True)
+        message.id = 901
+        self.log = mock.create_autospec(discord.TextChannel, instance=True)
+        self.log.send = mock.AsyncMock(return_value=message)
+        self.patch = mock.patch.object(layout, "channel", return_value=self.log)
+        self.patch.start()
+        self.guild = mock.create_autospec(discord.Guild, instance=True)
+        self.guild.name = "Test"
+        self.member = mock.create_autospec(discord.Member, instance=True)
+        self.member.id = 7
+        self.member.send = mock.AsyncMock()
+
+    def tearDown(self):
+        self.patch.stop()
+        store.DATA_DIR = self._saved_dir
+        shutil.rmtree(self._tmp)
+
+    async def test_it_is_a_case_on_the_record_and_is_posted_in_mod_log(self):
+        case = await moderator.warn_by_admin(self.guild, self.member, 2, "Keep it civil.", 42)
+        self.assertEqual((case["action"], case["decided_by"]), (cases.WARN, cases.BY_ADMIN))
+        self.assertEqual(cases.record_of(7, int(time.time()), 30),
+                         {"warnings": 1, "timeouts": 0})
+        self.assertEqual(cases.get(case["no"])["log_message_id"], 901)
+        embed = self.log.send.await_args.kwargs["embed"]
+        self.assertEqual(embed.title, "Case 1 · Warning")
+        self.assertEqual([f.value for f in embed.fields if f.name == "Decided by"],
+                         ["<@42>, an admin, alone"])
+
+    async def test_the_member_is_told_why_and_can_appeal(self):
+        await moderator.warn_by_admin(self.guild, self.member, 2, "Keep it civil.", 42)
+        self.member.send.assert_awaited_once()
+        self.assertIn("Keep it civil.", self.member.send.await_args.args[0])
+        self.assertIn("Rule 2", self.member.send.await_args.args[0])
+
+    async def test_an_appeal_says_an_admin_decided_it(self):
+        case = await moderator.warn_by_admin(self.guild, self.member, 2, "Keep it civil.", 42)
+        _, details = appeals.appeal_text(case, "It was a joke.")
+        self.assertIn("decided by an admin alone", details)
+        self.assertNotIn("None", details)
+
+    async def test_warnings_from_admins_add_up_to_a_timeout(self):
+        for _ in range(2):
+            await moderator.warn_by_admin(self.guild, self.member, 2, "Again.", 42)
+        record = cases.record_of(7, int(time.time()), 30)
+        self.assertEqual(record, {"warnings": 2, "timeouts": 0})
+        self.assertEqual(judge.sanction(judge.MILD, record, settings.current()).action,
+                         cases.TIMEOUT)
 
 
 if __name__ == "__main__":

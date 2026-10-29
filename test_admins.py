@@ -21,6 +21,7 @@ import admins
 import assistant
 import guard
 import layout
+import moderator
 import quick
 import store
 
@@ -458,6 +459,40 @@ class Tools(WithTempData):
                                                        {"role": "Gamers"}))
         give.assert_awaited_once_with(ctx.member, "Gamers")
         self.assertEqual(said, {"result": "Done: Gamers is now on 3 members."})
+
+    async def test_warning_a_member_is_admins_only(self):
+        target = mock.create_autospec(discord.Member, instance=True)
+        target.id, target.display_name = 8, "m8"
+        guild = mock.create_autospec(discord.Guild, instance=True)
+        guild.get_member.return_value = target
+        asker = mock.create_autospec(discord.Member, instance=True)
+        asker.id = ADMIN
+        ctx = assistant.Context(guild=guild, member=asker)
+        args = {"member": "<@8>", "rule": 2, "reason": "Keep it civil."}
+        said = json.loads(await assistant.run_tool(ctx, "warn_member", args))
+        self.assertEqual(said, {"error": "No such tool."})
+        ctx.admin = True
+        with mock.patch.object(moderator, "warn_by_admin",
+                               mock.AsyncMock(return_value={"no": 4})) as warn, \
+                mock.patch.object(layout, "server_log", mock.AsyncMock()) as server_log:
+            said = json.loads(await assistant.run_tool(ctx, "warn_member", args))
+        warn.assert_awaited_once_with(guild, target, 2, "Keep it civil.", ADMIN)
+        server_log.assert_awaited_once()
+        self.assertEqual(said, {"result": "Warned m8 as case 4. It counts on their record."})
+
+    async def test_a_warning_names_a_rule_that_exists(self):
+        target = mock.create_autospec(discord.Member, instance=True)
+        target.id = 8
+        guild = mock.create_autospec(discord.Guild, instance=True)
+        guild.get_member.return_value = target
+        asker = mock.create_autospec(discord.Member, instance=True)
+        asker.id = ADMIN
+        ctx = assistant.Context(guild=guild, member=asker, admin=True)
+        with mock.patch.object(moderator, "warn_by_admin", mock.AsyncMock()) as warn:
+            said = json.loads(await assistant.run_tool(
+                ctx, "warn_member", {"member": "<@8>", "rule": 99, "reason": "Rude."}))
+        warn.assert_not_awaited()
+        self.assertIn("error", said)
 
 
 if __name__ == "__main__":

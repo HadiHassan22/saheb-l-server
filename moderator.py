@@ -238,6 +238,49 @@ async def _act(guild, member, channel, message_id, content, verdict, sanction, r
         await _call_admins(guild, member, channel, case)
 
 
+async def warn_by_admin(guild, member, rule, reason, admin_id):
+    """A warning an admin gives on command (assistant.py), with no vote. It
+    is a case like any other: DM'd, posted in #mod-log, appealable, and
+    counted on the member's record, so it adds up towards a timeout the same
+    way. It never scolds in the channel, and the bot never bans."""
+    now = int(time.time())
+    record = cases.record_of(member.id, now, settings.current()["warning_days"])
+    case = cases.open_case(
+        now, user_id=member.id, action=cases.WARN, minutes=0, deleted=False,
+        rule=rule, severity=None, explanation=reason, scores={}, record=record,
+        excerpt="", decided_by=cases.BY_ADMIN, called_admins=False, flagged=False,
+        given_by=admin_id,
+    )
+    try:
+        await member.send(
+            f"**Warning** in {guild.name}, case {case['no']}, from an admin.\n"
+            f"{reason} (Rule {rule}: {conduct.title(rule)}.)\n"
+            "Every case is posted publicly in the server's #mod-log. If you think "
+            "it's wrong, press Appeal and the community will vote on it.",
+            view=appeals.appeal_view(case["no"]))
+    except discord.HTTPException:
+        pass  # DMs closed; the public log still says it
+    log_channel = layout.channel(guild, "mod-log")
+    if log_channel is not None:
+        days = settings.current()["warning_days"]
+        embed = discord.Embed(title=f"Case {case['no']} · Warning", description=reason,
+                              colour=discord.Colour.gold())
+        embed.add_field(name="Member", value=f"<@{member.id}>")
+        embed.add_field(name="Rule", value=f"{rule}. {conduct.title(rule)}")
+        embed.add_field(
+            name=f"Record before this (last {days} days)",
+            value=f"{record['warnings']} warnings, {record['timeouts']} timeouts",
+            inline=False,
+        )
+        embed.add_field(name="Decided by", value=f"<@{admin_id}>, an admin, alone")
+        embed.set_footer(text=f"Think this is wrong? Anyone can appeal it with "
+                              f"/appeal case:{case['no']}")
+        message = await log_channel.send(embed=embed,
+                                         allowed_mentions=discord.AllowedMentions.none())
+        cases.update(case["no"], log_message_id=message.id)
+    return case
+
+
 async def _reply(message, state):
     """Saheb's answer to a flagged message that broke no rule. Written after
     the decision, like a scolding, so it can't change it."""
