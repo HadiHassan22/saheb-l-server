@@ -153,7 +153,7 @@ class System(unittest.TestCase):
         self.assertIn("Never use an em dash", assistant.SYSTEM)
 
     def test_the_bot_is_told_admins_can_give_everyone_a_role(self):
-        for name in ("set_admin", "overturn_case", "give_role_to_all"):
+        for name in ("set_admin", "overturn_case", "warn_member", "give_role_to_all"):
             self.assertIn(name, assistant.SYSTEM)
 
     def test_irreversible_changes_and_code_changes_need_confirming(self):

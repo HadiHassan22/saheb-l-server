@@ -13,6 +13,8 @@ OVERTURNED = "overturned"
 
 # A case the first check (Jev) decided alone, with no review (judge.py).
 FIRST_CHECK = "first check"
+# A warning an admin gave on command, with no vote (moderator.warn_by_admin).
+BY_ADMIN = "admin"
 
 
 def _load():

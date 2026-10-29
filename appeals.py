@@ -51,14 +51,15 @@ def appeal_text(case, reason):
     else:
         quoted = "||" + discord.utils.escape_markdown(case["excerpt"]) + "||"
     decided = ("the first check alone" if case.get("decided_by") == judge.FIRST_CHECK
+               else "an admin alone" if case.get("decided_by") == cases.BY_ADMIN
                else "a second review")
+    weight = f", {case['severity']} severity" if case.get("severity") else ""
     undo = UNDO[case["action"]]
     if case.get("deleted"):
         undo += ". The deleted message can't be restored"
     details = (
         f"**The case.** {cases.label(case)} for <@{case['user_id']}> under rule "
-        f"{case['rule']} ({rule_title}), {case['severity']} severity, decided by "
-        f"{decided}.\n"
+        f"{case['rule']} ({rule_title}){weight}, decided by {decided}.\n"
         f"**The moderator's explanation.** {case['explanation']}\n"
         f"**The message.** {quoted}\n\n"
         f"**Why it should be overturned.** {reason.strip()}\n\n"
