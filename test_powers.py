@@ -507,6 +507,61 @@ class GiveToEveryone(WithTempData):
         logged.assert_awaited_once()
 
 
+class Depress(WithTempData):
+    """quick.depress: an admin gives one member the depress role. It is never
+    made by vote, so no picker offers it and nobody can join it."""
+
+    def server(self, *roles):
+        guild = mock.create_autospec(discord.Guild, instance=True)
+        guild.roles = list(roles)
+        guild.get_role.side_effect = lambda rid: next((r for r in guild.roles if r.id == rid),
+                                                      None)
+        asking = mock.create_autospec(discord.Member, instance=True)
+        asking.id, asking.display_name, asking.guild = 9, "Nestled", guild
+        return asking
+
+    def person(self, id, name, *has):
+        one = mock.create_autospec(discord.Member, instance=True)
+        one.id, one.display_name, one.roles = id, name, list(has)
+        return one
+
+    async def test_the_role_is_made_once_with_no_powers_and_kept_by_id(self):
+        made = role(50, "depress")
+        asking = self.server()
+        asking.guild.create_role.return_value = made
+        maya = self.person(2, "Maya")
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            said = await quick.depress(asking, maya)
+        made_with = asking.guild.create_role.call_args.kwargs
+        self.assertEqual(made_with["name"], "depress")
+        self.assertEqual(made_with["permissions"], discord.Permissions.none())
+        self.assertFalse(made_with["hoist"] or made_with["mentionable"])
+        maya.add_roles.assert_awaited_once_with(made, reason="Asked for by Nestled")
+        self.assertEqual(store.load("depress", {}), {"role": 50})
+        self.assertEqual(said, "Done: Maya has the depress role.")
+        self.assertIn("<@9> gave <@2> the depress role", logged.call_args.args[1])
+
+    async def test_the_next_time_it_uses_the_same_role_and_says_when_one_has_it(self):
+        made = role(50, "depress")
+        asking = self.server(made)
+        store.save("depress", {"role": 50})
+        maya = self.person(2, "Maya", made)
+        said = await quick.depress(asking, maya)
+        asking.guild.create_role.assert_not_awaited()
+        maya.add_roles.assert_not_awaited()
+        self.assertEqual(said, "Maya already has the depress role.")
+
+    async def test_nobody_can_join_it_and_it_is_in_no_picker(self):
+        made = role(50, "depress")
+        asking = self.server(made)
+        store.save("depress", {"role": 50})
+        maya = self.person(2, "Maya")
+        maya.guild = asking.guild
+        with self.assertRaisesRegex(quick.Refused, "isn't a role members can join"):
+            await quick.join_role(maya, "depress")
+        self.assertNotIn(50, actions.voted_roles())
+
+
 class Guard(WithTempData):
     def test_powers_are_taken_and_everything_else_kept(self):
         kept = discord.Permissions(send_messages=True, connect=True, change_nickname=True)

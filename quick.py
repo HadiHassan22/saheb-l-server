@@ -7,7 +7,8 @@
   are limited per member, and can be undone by vote. Pins and unpins are a
   vote (actions.py): they are shown to everyone, so members decide them together.
 - Admin: done on an admin's word alone, posted in #server-log with who
-  asked: giving an existing role to every member of the server.
+  asked: giving an existing role to every member of the server, and the
+  depress role to one member.
 
 Each function returns what to tell the member, or raises Refused.
 """
@@ -226,6 +227,26 @@ async def give_role_to_all(member, name):
     if missed:
         said += f" Left out {missed} member{'s' * (missed != 1)} I can't act on."
     return said
+
+
+async def depress(member, target):
+    """Give `target` the role "depress", asked for by `member`, who must be
+    an admin (the caller checks). The role carries no powers and is never
+    made by vote, so no #roles picker offers it and nobody can join it: only
+    an admin gives it. Its id is kept, so renaming it doesn't make another.
+    Posted in #server-log with who asked. Returns what to tell them."""
+    guild = member.guild
+    role = guild.get_role(store.load("depress", {}).get("role") or 0)
+    if role is None:
+        role = await guild.create_role(name="depress", permissions=discord.Permissions.none(),
+                                       hoist=False, mentionable=False,
+                                       reason=f"Asked for by {member.display_name}")
+        store.save("depress", {"role": role.id})
+    if any(r.id == role.id for r in target.roles):
+        return f"{target.display_name} already has the {role.name} role."
+    await target.add_roles(role, reason=f"Asked for by {member.display_name}")
+    await layout.server_log(guild, f"<@{member.id}> gave <@{target.id}> the {role.name} role.")
+    return f"Done: {target.display_name} has the {role.name} role."
 
 
 # ---------- temporary voice channels close themselves ----------

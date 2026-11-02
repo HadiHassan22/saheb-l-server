@@ -297,6 +297,9 @@ ADMIN_TOOLS = [
            "reason": REASON}, ["member", "rule", "reason"]),
     _tool("give_role_to_all", "Give an existing role to every member of the server at "
           "once. Roles give no powers.", {"role": S}, ["role"]),
+    _tool("depress", "Give a member the role called depress, at once. It gives no powers, "
+          "and no #roles picker offers it or lets anyone join it, so only admins give it.",
+          {"member": {"type": "string", "description": "A mention"}}, ["member"]),
     _tool("remote_control", "For what no other tool can do because a bot can't (the "
           "vanity link, settings only Discord's own app has): Saheb does it in Discord's "
           "own app, in a browser. Nothing happens until the admin reads the request in "
@@ -334,7 +337,7 @@ TIER = {
     "draft_setting_change": DRAFT, "draft_proposal": DRAFT,
     "draft_picker_change": DRAFT, "draft_onboarding_change": DRAFT,
     "set_admin": ADMIN, "overturn_case": ADMIN, "warn_member": ADMIN,
-    "give_role_to_all": ADMIN, "remote_control": ADMIN,
+    "give_role_to_all": ADMIN, "depress": ADMIN, "remote_control": ADMIN,
 }
 
 
@@ -707,6 +710,14 @@ async def _give_role_to_all(ctx, args):
     return _done(await quick.give_role_to_all(ctx.member, args["role"]))
 
 
+async def _depress(ctx, args):
+    target = actions.member_id(args.get("member"))
+    member = ctx.guild.get_member(target) if target else None
+    if member is None:
+        return _json(error="Mention the member (@name) so there's no doubt who is meant.")
+    return _done(await quick.depress(ctx.member, member))
+
+
 async def _remote_control(ctx, args):
     return _done(await remote.ask(ctx.guild, ctx.member, args["instruction"]))
 
@@ -741,7 +752,8 @@ _TOOLS = {
     "draft_picker_change": _draft_action, "draft_onboarding_change": _draft_action,
     "set_admin": _set_admin, "overturn_case": _overturn_case,
     "warn_member": _warn_member,
-    "give_role_to_all": _give_role_to_all, "remote_control": _remote_control,
+    "give_role_to_all": _give_role_to_all, "depress": _depress,
+    "remote_control": _remote_control,
 }
 
 
