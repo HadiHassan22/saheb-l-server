@@ -460,6 +460,23 @@ class Tools(WithTempData):
         give.assert_awaited_once_with(ctx.member, "Gamers")
         self.assertEqual(said, {"result": "Done: Gamers is now on 3 members."})
 
+    async def test_depressing_a_member_is_admins_only(self):
+        target = mock.create_autospec(discord.Member, instance=True)
+        target.id, target.display_name = 8, "m8"
+        guild = mock.create_autospec(discord.Guild, instance=True)
+        guild.get_member.return_value = target
+        asker = mock.create_autospec(discord.Member, instance=True)
+        asker.id = ADMIN
+        ctx = assistant.Context(guild=guild, member=asker)
+        said = json.loads(await assistant.run_tool(ctx, "depress", {"member": "<@8>"}))
+        self.assertEqual(said, {"error": "No such tool."})
+        ctx.admin = True
+        with mock.patch.object(quick, "depress", mock.AsyncMock(
+                return_value="Done: m8 has the depress role.")) as depress:
+            said = json.loads(await assistant.run_tool(ctx, "depress", {"member": "<@8>"}))
+        depress.assert_awaited_once_with(asker, target)
+        self.assertEqual(said, {"result": "Done: m8 has the depress role."})
+
     async def test_warning_a_member_is_admins_only(self):
         target = mock.create_autospec(discord.Member, instance=True)
         target.id, target.display_name = 8, "m8"

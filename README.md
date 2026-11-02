@@ -233,11 +233,13 @@ What a vote can order, carried out by code when it passes (`actions.py`):
   with `/admin add` or by asking the bot, see `admins.py`; the owner
   counts as one), what they ask for is done at once, without questions:
   recorded in `#proposals` as passed and carried out like a passed
-  vote, and the bot says what came of it. Admins also get four tools
+  vote, and the bot says what came of it. Admins also get five tools
   members don't: making or removing admins, overturning a moderation
   case, warning a member for the rule they broke (it counts on their
-  record like any warning), and giving an existing role to every member
-  at once.
+  record like any warning), giving an existing role to every member
+  at once, and giving one member the **depress** role. That role carries
+  no powers, no picker offers it and nobody can join it, so only admins
+  give it.
   An admin who asks for a vote rather than the change itself gets a
   draft with a **File it** button, and members vote on it as usual.
   Deleting a channel or category, clearing a channel's history, and a
@@ -609,7 +611,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: a Choose button opens each one privately, filled in with your roles |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 41 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 42 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |
