@@ -152,6 +152,13 @@ class System(unittest.TestCase):
     def test_the_bot_is_told_never_to_use_an_em_dash(self):
         self.assertIn("Never use an em dash", assistant.SYSTEM)
 
+    def test_banter_on_request_is_only_about_the_member_who_asked(self):
+        self.assertIn("Banter on request", assistant.SYSTEM)
+        self.assertIn("about that member only", assistant.SYSTEM)
+        self.assertIn("Never aim it at a third member", assistant.SYSTEM)
+        self.assertIn("protected group", assistant.SYSTEM)
+        self.assertIn("reporting a rule break", assistant.SYSTEM)
+
     def test_the_bot_is_told_admins_can_give_everyone_a_role(self):
         for name in ("set_admin", "overturn_case", "warn_member", "give_role_to_all"):
             self.assertIn(name, assistant.SYSTEM)
