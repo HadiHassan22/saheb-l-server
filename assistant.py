@@ -86,7 +86,7 @@ What your tools do:
 - Look things up: settings, channels, roles, events, rules, proposals, moderation cases, onboarding. Show a member's avatar ("av @name"), or the asker's own, under your reply.
 - Read the message a member replied to when they tagged you, and see images attached to their message or that one, and use what's in them, for example drafting an emoji, a sticker or the server's icon straight from the attachment instead of asking them to describe it.
 - At once, for the member themself: their name color, joining or leaving a role, their nickname, an invite link.
-- At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread.
+- At once, small shared things, posted publicly with who asked: an event (times are Beirut time), cancelling their own event, a temporary voice channel, a thread, a message posted as you in a channel they name (post_message; no pings).
 - Draft a proposal for anything that changes the server for everyone: channels and categories, roles, pickers, onboarding (the questions new members answer when they join, and the channels they see first; every picker is asked there too, on its own), emojis, stickers and soundboard sounds (members play the sounds in voice channels), the server's name or icon, the rules, AutoMod's watch words, cancelling someone else's event, pinning or unpinning a message, a setting, kicking, banning or unbanning a member, or changing another member's nickname. Anything else, like a new feature or a change to how you work, is a general proposal: if it passes, it is written as a code change. The member files a draft with the button under your reply, then members vote on its card in #votes with Yes and No (Overturn and Keep on an appeal) and talk it over in the thread under the card. #proposals shows how every proposal ended.
 - Before a member's draft is saved, a separate check reads what they wrote and turns it away if it is banter rather than a real request. If a tool says it was turned away, tell them plainly and don't draft it again unless they ask for something different.
 
@@ -178,6 +178,9 @@ TOOLS = [
           {"name": S, "hours": {"type": "integer", "description": "1 to 12"}}),
     _tool("start_thread", "Start a thread in a channel.", {"channel": S, "name": S},
           ["channel", "name"]),
+    _tool("post_message", "Post a message in a channel, as yourself, for everyone to see, "
+          "with who asked noted under it. Only channels members can see and post in; it "
+          "pings no one.", {"channel": S, "text": S}, ["channel", "text"]),
     # drafts
     _draft_tool("draft_channel_change",
                 "Draft a proposal about channels or categories. Channels: create_channel "
@@ -329,7 +332,7 @@ TIER = {
     "set_my_color": SELF, "join_role": SELF, "leave_role": SELF,
     "set_my_nickname": SELF, "create_invite": SELF,
     "create_event": LIGHT, "cancel_my_event": LIGHT, "create_temp_voice": LIGHT,
-    "start_thread": LIGHT,
+    "start_thread": LIGHT, "post_message": LIGHT,
     "draft_channel_change": DRAFT, "draft_role_change": DRAFT, "draft_emoji_change": DRAFT,
     "draft_sticker_change": DRAFT, "draft_sound_change": DRAFT,
     "draft_server_change": DRAFT, "draft_rules_change": DRAFT,
@@ -563,6 +566,10 @@ async def _start_thread(ctx, args):
     return _done(await quick.start_thread(ctx.member, args["channel"], args["name"]))
 
 
+async def _post_message(ctx, args):
+    return _done(await quick.post_message(ctx.member, args["channel"], args["text"]))
+
+
 async def _draft(ctx, kind, title, details, payload):
     """Draft it for the member to file, or, for an admin, do it at once
     unless they asked for a vote. What needs_confirming asks for comes back
@@ -742,6 +749,7 @@ _TOOLS = {
     "set_my_nickname": _set_my_nickname, "create_invite": _create_invite,
     "create_event": _create_event, "cancel_my_event": _cancel_my_event,
     "create_temp_voice": _create_temp_voice, "start_thread": _start_thread,
+    "post_message": _post_message,
     "draft_pin_message": _draft_pin_message, "draft_unpin_message": _draft_unpin_message,
     "draft_channel_change": _draft_action, "draft_role_change": _draft_role_change,
     "draft_emoji_change": _draft_action, "draft_sticker_change": _draft_action,

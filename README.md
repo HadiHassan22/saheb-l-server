@@ -195,7 +195,7 @@ model. That still counts towards the chat limit (`chat.py`).
 | --- | --- | --- |
 | Look | Answers from the server's records | settings, channels, roles, events, rules, proposals, moderation cases, onboarding |
 | Personal | Only the member asking, who can undo it: done at once | name color; join or leave a role; nickname; an invite link (up to 10 uses, 24 hours, 5 a day) |
-| Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread |
+| Light | Small, shared, reversible: done at once, posted in `#server-log` with who asked, limited per member | schedule or cancel your own event (Beirut time); a temporary voice channel (closes when empty or after up to 12 hours); start a thread; a message posted by the bot in a channel members can see and post in (no pings, 5 a day) |
 | Draft | Changes the server for everyone, or acts on a member: a vote | see below (pinning or unpinning a message is one: pins are shown to everyone) |
 
 What a vote can order, carried out by code when it passes (`actions.py`):
@@ -611,7 +611,7 @@ one changed, and is told why it wasn't kept.
 | `admins.py` | The admins, `/admin`, the Admin role, posting admins' own Discord actions, and who reads `#admin-log` (protected) |
 | `pickers.py` | The pickers in `#roles`, made by vote or grouped by the bot: a Choose button opens each one privately, filled in with your roles |
 | `onboarding.py` | Discord's onboarding: the default questions and channels, and every picker as a question |
-| `assistant.py` | What the bot may do when asked: 42 tools, their tiers, the conversation |
+| `assistant.py` | What the bot may do when asked: 43 tools, their tiers, the conversation |
 | `actions.py` | Everything a vote can order, checked and carried out by code; the server-change kind of proposal |
 | `quick.py` | What's done at once when asked: personal and light actions with their limits, and a role given to every member on an admin's word |
 | `guard.py` | Keeps every role but Admin cosmetic (protected) |

@@ -3,8 +3,9 @@
 - Personal: they affect only the member asking, who can undo them: joining
   or leaving a role, their nickname, an invite link to bring someone in.
 - Light: small shared things: an event, a temporary voice channel, a
-  thread. They happen at once, are posted in #server-log with who asked,
-  are limited per member, and can be undone by vote. Pins and unpins are a
+  thread, a message in a channel. They happen at once, are posted in
+  #server-log with who asked, are limited per member, and can be undone by
+  vote. Pins and unpins are a
   vote (actions.py): they are shown to everyone, so members decide them together.
 - Admin: done on an admin's word alone, posted in #server-log with who
   asked: giving an existing role to every member of the server, and the
@@ -28,9 +29,10 @@ import store
 BEIRUT = ZoneInfo("Asia/Beirut")
 DAY = 24 * 60 * 60
 # How many of each a member can do per day.
-DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10}
+DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10, "post": 5}
 EVENTS_EACH, VOICE_EACH, VOICE_TOTAL = 3, 1, 10
 VOICE_HOURS, EMPTY_GRACE = 12, 15 * 60
+POST_CHARS = 1500  # leaves room under it for who asked, within Discord's 2000
 
 
 class Refused(Exception):
@@ -192,6 +194,32 @@ async def start_thread(member, channel, name):
     await layout.server_log(guild, f"{member.display_name} started the thread "
                                    f"{thread.name} in #{target.name}.")
     return f"Started {thread.mention}."
+
+
+def _members_see_and_post(guild, channel):
+    """True for a text channel members can see and post in: not one of the bot's."""
+    return (actions.open_to_everyone(guild, channel)
+            and channel.overwrites_for(guild.default_role).view_channel is not False)
+
+
+async def post_message(member, channel, text):
+    """Post `text` in `channel` as the bot, for everyone to see, with who
+    asked noted under it. It pings no one, so the text can't notify anyone,
+    and it only goes where members can see it. Posted in #server-log too."""
+    guild = member.guild
+    target = find_channel(guild, channel)
+    if not _members_see_and_post(guild, target):
+        raise Refused("Messages can only go in channels members can see and post in.")
+    text = str(text or "").strip()
+    if not text:
+        raise Refused("Tell me what to post.")
+    if "github.com" in text.lower():
+        raise Refused("I can't post links to the code.")
+    spend(member.id, "post", time.time())
+    await target.send(f"{text[:POST_CHARS]}\n-# Asked for by <@{member.id}>",
+                      allowed_mentions=discord.AllowedMentions.none())
+    await layout.server_log(guild, f"{member.display_name} had me post in #{target.name}: {text}")
+    return f"Posted in #{target.name}."
 
 
 # ---------- admin ----------
