@@ -29,6 +29,7 @@ import colors
 import layout
 import proposals
 import providers
+import quick
 import setting_changes
 import settings
 import store
@@ -192,7 +193,8 @@ class Tiers(unittest.TestCase):
         self.assertEqual(tier(assistant.SELF), {
             "set_my_color", "join_role", "leave_role", "set_my_nickname", "create_invite"})
         self.assertEqual(tier(assistant.LIGHT), {
-            "create_event", "cancel_my_event", "create_temp_voice", "start_thread"})
+            "create_event", "cancel_my_event", "create_temp_voice", "start_thread",
+            "post_message"})
         self.assertIn("draft_pin_message", tier(assistant.DRAFT))
         self.assertIn("draft_unpin_message", tier(assistant.DRAFT))
         self.assertTrue(all(n.startswith(("draft_", "get_", "list_"))
@@ -838,6 +840,62 @@ class Counting(unittest.TestCase):
         self.assertEqual(voting_ui.people(loading), 4)
         unknown = types.SimpleNamespace(chunked=False, members=[], member_count=None)
         self.assertIsNone(voting_ui.people(unknown))
+
+
+class Posting(WithTempData, unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        super().setUp()
+        self.guild.default_role = mock.create_autospec(discord.Role, instance=True)
+        self.member = mock.create_autospec(discord.Member, instance=True)
+        self.member.guild, self.member.id, self.member.display_name = self.guild, 7, "Rami"
+        self.general = self.guild.channels[2]  # #general, a text channel members post in
+        self.general.send = mock.AsyncMock()
+        self.general.overwrites_for = mock.Mock(return_value=discord.PermissionOverwrite())
+
+    def hide_from_members(self):
+        self.general.overwrites_for.return_value = discord.PermissionOverwrite(view_channel=False)
+
+    async def test_a_message_goes_out_with_who_asked_and_pings_no_one(self):
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()) as logged:
+            said = await quick.post_message(self.member, "#general", "send hi")
+        self.general.send.assert_awaited_once()
+        args, kwargs = self.general.send.call_args
+        self.assertEqual(args, ("send hi\n-# Asked for by <@7>",))
+        self.assertEqual(kwargs["allowed_mentions"].to_dict(),
+                         discord.AllowedMentions.none().to_dict())
+        self.assertIn("Rami had me post in #general: send hi", logged.call_args.args[1])
+        self.assertEqual(said, "Posted in #general.")
+
+    async def test_a_long_message_is_cut_to_fit_with_who_asked_under_it(self):
+        await quick.post_message(self.member, "general", "x" * 5000)
+        content = self.general.send.call_args.args[0]
+        self.assertLessEqual(len(content), 2000)
+        self.assertTrue(content.endswith("-# Asked for by <@7>"))
+
+    async def test_only_channels_members_can_see_and_post_in(self):
+        self.hide_from_members()
+        with self.assertRaises(quick.Refused):
+            await quick.post_message(self.member, "general", "hi")
+        with self.assertRaises(quick.Refused):
+            await quick.post_message(self.member, "Gaming 1", "hi")
+        self.general.send.assert_not_awaited()
+
+    async def test_links_are_left_out_and_an_empty_message_is_refused(self):
+        await quick.post_message(self.member, "general", "look at <https://example.com/x>")
+        self.assertEqual(self.general.send.call_args.args[0],
+                         "look at\n-# Asked for by <@7>")
+        for text in ("   ", "https://example.com/x"):
+            with self.assertRaises(quick.Refused):
+                await quick.post_message(self.member, "general", text)
+        self.assertEqual(self.general.send.await_count, 1)
+
+    async def test_each_member_can_post_a_few_times_a_day(self):
+        with mock.patch.object(layout, "server_log", mock.AsyncMock()):
+            for _ in range(quick.DAILY["post"]):
+                await quick.post_message(self.member, "general", "hi")
+            with self.assertRaises(quick.Refused):
+                await quick.post_message(self.member, "general", "hi")
+        self.assertEqual(self.general.send.await_count, quick.DAILY["post"])
 
 
 class CarryingOut(WithTempData, unittest.IsolatedAsyncioTestCase):
