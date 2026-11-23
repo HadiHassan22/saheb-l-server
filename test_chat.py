@@ -880,11 +880,14 @@ class Posting(WithTempData, unittest.IsolatedAsyncioTestCase):
             await quick.post_message(self.member, "Gaming 1", "hi")
         self.general.send.assert_not_awaited()
 
-    async def test_an_empty_message_or_a_github_link_is_refused(self):
-        for text in ("   ", "see https://github.com/someone/saheb"):
+    async def test_links_are_left_out_and_an_empty_message_is_refused(self):
+        await quick.post_message(self.member, "general", "look at <https://example.com/x>")
+        self.assertEqual(self.general.send.call_args.args[0],
+                         "look at\n-# Asked for by <@7>")
+        for text in ("   ", "https://example.com/x"):
             with self.assertRaises(quick.Refused):
                 await quick.post_message(self.member, "general", text)
-        self.general.send.assert_not_awaited()
+        self.assertEqual(self.general.send.await_count, 1)
 
     async def test_each_member_can_post_a_few_times_a_day(self):
         with mock.patch.object(layout, "server_log", mock.AsyncMock()):

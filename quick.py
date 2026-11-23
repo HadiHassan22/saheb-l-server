@@ -14,6 +14,7 @@
 Each function returns what to tell the member, or raises Refused.
 """
 
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -33,6 +34,7 @@ DAILY = {"invite": 5, "event": 3, "voice": 3, "thread": 10, "post": 5}
 EVENTS_EACH, VOICE_EACH, VOICE_TOTAL = 3, 1, 10
 VOICE_HOURS, EMPTY_GRACE = 12, 15 * 60
 POST_CHARS = 1500  # leaves room under it for who asked, within Discord's 2000
+LINK = re.compile(r"<?https?://\S+>?")  # links are left out, as updates.summary_of does
 
 
 class Refused(Exception):
@@ -205,16 +207,15 @@ def _members_see_and_post(guild, channel):
 async def post_message(member, channel, text):
     """Post `text` in `channel` as the bot, for everyone to see, with who
     asked noted under it. It pings no one, so the text can't notify anyone,
-    and it only goes where members can see it. Posted in #server-log too."""
+    and it only goes where members can see it. Links are left out, so no
+    link to the code can reach members. Posted in #server-log too."""
     guild = member.guild
     target = find_channel(guild, channel)
     if not _members_see_and_post(guild, target):
         raise Refused("Messages can only go in channels members can see and post in.")
-    text = str(text or "").strip()
+    text = LINK.sub("", str(text or "")).strip()
     if not text:
-        raise Refused("Tell me what to post.")
-    if "github.com" in text.lower():
-        raise Refused("I can't post links to the code.")
+        raise Refused("Tell me what to post, without links.")
     spend(member.id, "post", time.time())
     await target.send(f"{text[:POST_CHARS]}\n-# Asked for by <@{member.id}>",
                       allowed_mentions=discord.AllowedMentions.none())
